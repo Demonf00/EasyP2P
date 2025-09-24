@@ -1,9 +1,9 @@
+import http from 'http';
 import { WebSocketServer } from 'ws';
 import { customAlphabet } from 'nanoid';
 
 const alphabet = '0123456789ABCDEFGHJKLMNPQRSTVWXYZ';
 const nanoid = customAlphabet(alphabet, 7);
-
 function checksum(code) {
   const mod = 31; let a = 0;
   for (let i = 0; i < code.length; i++) a = (a * 33 + alphabet.indexOf(code[i])) % mod;
@@ -12,10 +12,33 @@ function checksum(code) {
 
 const port = process.env.PORT ? Number(process.env.PORT) : 8788;
 const host = process.env.BIND_HOST || '127.0.0.1';
-const wss  = new WebSocketServer({ host, port });
 
-/** code -> Set<ws> */
-const rooms = new Map();
+// ICE list (Google STUN + optional TURN from env)
+const STUN = { urls: [
+  'stun:stun.l.google.com:19302',
+  'stun:stun1.l.google.com:19302',
+  'stun:stun2.l.google.com:19302',
+  'stun:stun3.l.google.com:19302',
+  'stun:stun4.l.google.com:19302'
+]};
+const ICE_SERVERS = [STUN];
+if (process.env.TURN_URLS && process.env.TURN_USER && process.env.TURN_PASS) {
+  const urls = process.env.TURN_URLS.split(',').map(s => s.trim()).filter(Boolean);
+  ICE_SERVERS.push({ urls, username: process.env.TURN_USER, credential: process.env.TURN_PASS });
+}
+
+const rooms = new Map(); // code -> Set<ws>
+
+const api = http.createServer((req, res) => {
+  if (req.url === '/ice') {
+    res.setHeader('content-type','application/json');
+    res.end(JSON.stringify({ iceServers: ICE_SERVERS }));
+    return;
+  }
+  res.statusCode = 404; res.end('not found');
+});
+
+const wss = new WebSocketServer({ server: api, path: '/ws' });
 
 function broadcast(set, data, except) {
   for (const peer of set) if (peer !== except && peer.readyState === 1) peer.send(data);
@@ -47,11 +70,9 @@ wss.on('connection', (ws) => {
     }
 
     if (msg.type === 'signal') {
-      console.log('[signaling] signal');
-      const payload = msg.payload;
       const set = rooms.get(ws.roomCode); if (!set) return;
       for (const peer of set) if (peer !== ws && peer.readyState === 1)
-        peer.send(JSON.stringify({ type: 'signal', payload }));
+        peer.send(JSON.stringify({ type: 'signal', payload: msg.payload }));
       return;
     }
 
@@ -69,5 +90,6 @@ wss.on('connection', (ws) => {
   });
 });
 
-wss.on('error', (err) => console.error('[signaling] server error:', err?.message));
-console.log(`[signaling] listening on ${host}:${port}`);
+api.listen(port, host, () => console.log(`[signaling] listening on ${host}:${port}`));
+wss.on('error', (err) => console.error('[signaling] ws error:', err?.message));
+api.on('error', (err) => console.error('[signaling] http error:', err?.message));

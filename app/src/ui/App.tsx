@@ -1,10 +1,10 @@
-import React, { useMemo, useRef, useState } from 'react';
+import React, { useEffect, useMemo, useRef, useState } from 'react';
 import { Room } from '../net/room';
 import { games } from '../games';
 import { Gomoku } from '../games/gomoku/rules';
 import GomokuBoard from './GomokuBoard';
 
-const STUNS: RTCIceServer[] = [
+const STUNS_FALLBACK: RTCIceServer[] = [
   { urls: [
       'stun:stun.l.google.com:19302',
       'stun:stun1.l.google.com:19302',
@@ -12,8 +12,6 @@ const STUNS: RTCIceServer[] = [
       'stun:stun3.l.google.com:19302',
       'stun:stun4.l.google.com:19302',
     ] },
-  // Add your TURN here for NAT fallback:
-  // { urls: 'turn:your.turn.server:3478', username: 'u', credential: 'p' },
 ];
 
 export default function App() {
@@ -22,12 +20,37 @@ export default function App() {
   const [mySide, setMySide] = useState<0|1>(0);
   const [gameId, setGameId] = useState<string>(Gomoku.id);
   const [state, setState] = useState(Gomoku.setup());
+  const [ice, setIce] = useState<RTCIceServer[]>([]);
 
-  const wsUrl = useMemo(() => {
-    return (import.meta as any).env?.VITE_SIGNALING_URL || 'ws://127.0.0.1:8788';
-  }, []);
+  const envUrl = (import.meta as any).env?.VITE_SIGNALING_URL as string | undefined;
+  const { wsUrl, iceUrl } = useMemo(() => {
+    if (envUrl) {
+      const u = new URL(envUrl);
+      const httpProto = u.protocol === 'wss:' ? 'https:' : 'http:';
+      return { wsUrl: envUrl, iceUrl: `${httpProto}//${u.host}/ice` };
+    }
+    const isHttps = window.location.protocol === 'https:';
+    const host = window.location.hostname;
+    const port = window.location.port;
+    if (port === '5173') {
+      return {
+        wsUrl: `${isHttps ? 'wss' : 'ws'}://${host}:8788/ws`,
+        iceUrl: `${isHttps ? 'https' : 'http'}://${host}:8788/ice`
+      };
+    }
+    return {
+      wsUrl: `${isHttps ? 'wss' : 'ws'}://${window.location.host}/ws`,
+      iceUrl: `${isHttps ? 'https' : 'http'}://${window.location.host}/ice`
+    };
+  }, [envUrl]);
 
-  const room = useMemo(()=> new Room({ signalingUrl: wsUrl, iceServers: STUNS }), [wsUrl]);
+  useEffect(() => {
+    fetch(iceUrl).then(r => r.json())
+      .then(({ iceServers }) => setIce(iceServers))
+      .catch(() => setIce(STUNS_FALLBACK));
+  }, [iceUrl]);
+
+  const room = useMemo(()=> new Room({ signalingUrl: wsUrl, iceServers: ice.length ? ice : STUNS_FALLBACK }), [wsUrl, ice]);
   const roomRef = useRef(room);
 
   room.onPeerData = (data) => {
@@ -43,6 +66,9 @@ export default function App() {
         const g = games[gameId]; setState(g.deserialize(msg.state));
       }
     } catch {}
+  };
+  room.onError = (reason) => {
+    alert(reason === 'NO_ROOM' ? '房主还没创建房间，请稍后再点 Join。' : `信令错误：${reason}`);
   };
 
   const host = () => {
@@ -63,14 +89,11 @@ export default function App() {
   };
 
   room.onOpen = () => { setConnected(true); room.send({ t: 'hello', game: gameId, side: mySide }); };
-  room.onError = (reason) => {
-    alert(reason === 'NO_ROOM' ? '房主还没创建房间，请稍后再点 Join。' : `信令错误：${reason}`);
-  };
 
   return (
     <div style={{ padding: 24, maxWidth: 900, margin: '0 auto' }}>
       <h1 style={{ fontSize: 22, fontWeight: 700, marginBottom: 6 }}>P2P Game Hub</h1>
-      <p style={{ fontSize: 13, opacity: 0.8, marginBottom: 12 }}>Select a game, host or join with a code. All gameplay goes over P2P WebRTC.</p>
+      <p style={{ fontSize: 13, opacity: 0.8, marginBottom: 12 }}>Cross-network ready: WSS + dynamic ICE (STUN/TURN).</p>
 
       <div className="panel" style={{ display: 'grid', gap: 8, gridTemplateColumns: '1fr 1fr 2fr' }}>
         <select className="input" value={gameId} onChange={e=> setGameId(e.target.value)}>
