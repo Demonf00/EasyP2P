@@ -21,28 +21,28 @@ export default function App() {
   const [gameId, setGameId] = useState<string>(Gomoku.id);
   const [state, setState] = useState(Gomoku.setup());
   const [ice, setIce] = useState<RTCIceServer[]>([]);
+  const [transport, setTransport] = useState<'webrtc' | 'relay'>('webrtc');
 
-  const envUrl = (import.meta as any).env?.VITE_SIGNALING_URL as string | undefined;
-  const { wsUrl, iceUrl } = useMemo(() => {
-    if (envUrl) {
-      const u = new URL(envUrl);
-      const httpProto = u.protocol === 'wss:' ? 'https:' : 'http:';
-      return { wsUrl: envUrl, iceUrl: `${httpProto}//${u.host}/ice` };
-    }
+  const envSignal = (import.meta as any).env?.VITE_SIGNALING_URL as string | undefined;
+  const envRelay = (import.meta as any).env?.VITE_RELAY_URL as string | undefined;
+
+  const { wsUrl, iceUrl, relayUrl } = useMemo(() => {
     const isHttps = window.location.protocol === 'https:';
     const host = window.location.hostname;
     const port = window.location.port;
-    if (port === '5173') {
-      return {
-        wsUrl: `${isHttps ? 'wss' : 'ws'}://${host}:8788/ws`,
-        iceUrl: `${isHttps ? 'https' : 'http'}://${host}:8788/ice`
-      };
-    }
-    return {
-      wsUrl: `${isHttps ? 'wss' : 'ws'}://${window.location.host}/ws`,
-      iceUrl: `${isHttps ? 'https' : 'http'}://${window.location.host}/ice`
-    };
-  }, [envUrl]);
+    const wsScheme = isHttps ? 'wss' : 'ws';
+    const httpScheme = isHttps ? 'https' : 'http';
+
+    const auto = port === '5173'
+      ? { ws: `${wsScheme}://${host}:8788/ws`, ice: `${httpScheme}://${host}:8788/ice` }
+      : { ws: `${wsScheme}://${window.location.host}/ws`, ice: `${httpScheme}://${window.location.host}/ice` };
+
+    const ws = envSignal || auto.ws;
+    const ice = envSignal ? (new URL(envSignal).protocol === 'wss:' ? 'https:' : 'http:') + '//' + new URL(envSignal).host + '/ice' : auto.ice;
+    const relay = envRelay || (port === '5173' ? `${wsScheme}://${host}:8989/relay` : `${wsScheme}://${window.location.host}/relay`);
+
+    return { wsUrl: ws, iceUrl: ice, relayUrl: relay };
+  }, [envSignal, envRelay]);
 
   useEffect(() => {
     fetch(iceUrl).then(r => r.json())
@@ -50,7 +50,7 @@ export default function App() {
       .catch(() => setIce(STUNS_FALLBACK));
   }, [iceUrl]);
 
-  const room = useMemo(()=> new Room({ signalingUrl: wsUrl, iceServers: ice.length ? ice : STUNS_FALLBACK }), [wsUrl, ice]);
+  const room = useMemo(()=> new Room({ signalingUrl: wsUrl, iceServers: ice.length ? ice : STUNS_FALLBACK, relayUrl }), [wsUrl, ice, relayUrl]);
   const roomRef = useRef(room);
 
   room.onPeerData = (data) => {
@@ -67,9 +67,9 @@ export default function App() {
       }
     } catch {}
   };
-  room.onError = (reason) => {
-    alert(reason === 'NO_ROOM' ? '房主还没创建房间，请稍后再点 Join。' : `信令错误：${reason}`);
-  };
+  room.onError = (reason) => alert(reason === 'NO_ROOM' ? '房主还没创建房间，请稍后再点 Join。' : `信令错误：${reason}`);
+  room.onOpen = () => { setConnected(true); room.send({ t: 'hello', game: gameId, side: mySide }); };
+  room.onTransportChange = (t) => setTransport(t);
 
   const host = () => {
     setMySide(0);
@@ -88,12 +88,12 @@ export default function App() {
     room.send({ t:'move', move: {x,y} });
   };
 
-  room.onOpen = () => { setConnected(true); room.send({ t: 'hello', game: gameId, side: mySide }); };
-
   return (
     <div style={{ padding: 24, maxWidth: 900, margin: '0 auto' }}>
       <h1 style={{ fontSize: 22, fontWeight: 700, marginBottom: 6 }}>P2P Game Hub</h1>
-      <p style={{ fontSize: 13, opacity: 0.8, marginBottom: 12 }}>Cross-network ready: WSS + dynamic ICE (STUN/TURN).</p>
+      <p style={{ fontSize: 13, opacity: 0.8, marginBottom: 12 }}>
+        WebRTC first, auto-fallback to <b>WS Relay</b> (no TURN required). Transport: <span className="tag">{transport}</span>
+      </p>
 
       <div className="panel" style={{ display: 'grid', gap: 8, gridTemplateColumns: '1fr 1fr 2fr' }}>
         <select className="input" value={gameId} onChange={e=> setGameId(e.target.value)}>

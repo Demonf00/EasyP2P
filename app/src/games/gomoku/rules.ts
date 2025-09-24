@@ -1,4 +1,4 @@
-export type Cell = -1 | 0 | 1; // -1 empty, 0 black, 1 white
+export type Cell = -1 | 0 | 1;
 export interface State { size: number; board: Cell[][]; turn: 0 | 1; }
 export interface Move { x: number; y: number; }
 

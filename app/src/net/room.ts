@@ -3,15 +3,20 @@ import Peer from 'simple-peer';
 export type PeerRole = 'host' | 'guest';
 
 export interface RoomOptions {
-  signalingUrl: string; // ws(s)://host[:port]/ws
-  iceServers: RTCIceServer[];
+  signalingUrl: string;      // ws(s)://host[:port]/ws  (for WebRTC signaling)
+  iceServers: RTCIceServer[]; // for WebRTC
+  relayUrl?: string;          // ws(s)://host[:port]/relay (optional fallback)
 }
 
+type Transport = 'webrtc' | 'relay';
+
 export class Room {
-  private ws!: WebSocket;
+  private ws!: WebSocket;             // signaling
+  private relay?: WebSocket;          // fallback relay
   private peers: Peer.Instance[] = [];
   private role: PeerRole = 'host';
   private options: RoomOptions;
+  private transport: Transport = 'webrtc';
   code = '';
 
   onOpen?: () => void;
@@ -19,6 +24,7 @@ export class Room {
   onPeerData?: (data: Uint8Array | string) => void;
   onPeersChange?: (n: number) => void;
   onError?: (reason: string) => void;
+  onTransportChange?: (t: Transport) => void;
 
   constructor(opts: RoomOptions) { this.options = opts; }
 
@@ -47,12 +53,20 @@ export class Room {
       config: { iceServers: this.options.iceServers },
       channelName: 'game',
     });
+    let connected = false;
+    const fallbackTimer = setTimeout(() => {
+      if (!connected && this.options.relayUrl) {
+        console.warn('[room] WebRTC timed out, falling back to WS relay');
+        this.useRelay();
+      }
+    }, 7000);
+
     peer.on('signal', (signal: any) => {
       if (this.ws && this.ws.readyState === WebSocket.OPEN) {
         this.ws.send(JSON.stringify({ type: 'signal', payload: signal }));
       }
     });
-    peer.on('connect', () => this.onOpen?.());
+    peer.on('connect', () => { connected = true; clearTimeout(fallbackTimer); this.transport = 'webrtc'; this.onTransportChange?.(this.transport); this.onOpen?.(); });
     peer.on('data', (data: any) => this.onPeerData?.(data));
     peer.on('close', () => this.onPeersChange?.(this.peers.length));
     peer.on('error', (e) => console.error('[peer] error', e));
@@ -61,15 +75,46 @@ export class Room {
     return peer;
   }
 
+  private useRelay() {
+    if (!this.options.relayUrl) return;
+    this.transport = 'relay'; this.onTransportChange?.(this.transport);
+    this.relay = new WebSocket(this.options.relayUrl);
+    this.relay.onopen = () => {
+      console.log('[relay] open');
+      this.relay!.send(JSON.stringify({ type: 'join', code: this.code }));
+      this.onOpen?.();
+    };
+    this.relay.onmessage = (ev) => {
+      if (typeof ev.data === 'string') {
+        try {
+          const msg = JSON.parse(ev.data);
+          if (msg.type === 'peer-join') return;
+          if (msg.type === 'error') this.onError?.(msg.reason || 'relay-error');
+          // opaque: actual payload is forwarded by client app
+          return;
+        } catch {}
+        this.onPeerData?.(ev.data);
+      } else {
+        this.onPeerData?.(ev.data as any);
+      }
+    };
+    this.relay.onerror = (e) => console.error('[relay] error', e);
+    this.relay.onclose = () => console.warn('[relay] closed');
+  }
+
   send(obj: any) {
     const payload = JSON.stringify(obj);
+    if (this.transport === 'relay' && this.relay && this.relay.readyState === WebSocket.OPEN) {
+      this.relay.send(payload);
+      return;
+    }
     for (const p of this.peers) {
       const ch: any = (p as any)._channel;
       if (ch && ch.readyState === 'open') p.send(payload);
     }
   }
 
-  close() { for (const p of this.peers) p.destroy(); this.ws?.close(); }
+  close() { for (const p of this.peers) p.destroy(); this.ws?.close(); this.relay?.close(); }
 
   private handleSignal(msg: any) {
     try { console.log('[ws] recv', msg); } catch {}
