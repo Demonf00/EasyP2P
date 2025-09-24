@@ -1,6 +1,5 @@
 import React, { useEffect, useMemo, useRef, useState } from 'react';
 import { Room } from '../net/room';
-import { games } from '../games';
 import { Gomoku } from '../games/gomoku/rules';
 import GomokuBoard from './GomokuBoard';
 
@@ -12,7 +11,6 @@ export default function App(){
   const [code, setCode] = useState('');
   const [connected, setConnected] = useState(false);
   const [mySide, setMySide] = useState<0|1>(0);
-  const [gameId, setGameId] = useState<string>(Gomoku.id);
   const [state, setState] = useState(Gomoku.setup());
   const [ice, setIce] = useState<RTCIceServer[]>([]);
   const [transport, setTransport] = useState<'webrtc'|'relay'>('webrtc');
@@ -22,46 +20,42 @@ export default function App(){
   const relayUrl= useMemo(()=> `ws://${host}:9002`, []);
   const iceUrl  = useMemo(()=> `${location.protocol}//${host}:9000/ice`, []);
 
-  useEffect(()=>{
-    fetch(iceUrl).then(r=>r.json()).then(({iceServers})=>setIce(iceServers)).catch(()=>setIce(STUNS_FALLBACK));
-  },[iceUrl]);
+  useEffect(()=>{ fetch(iceUrl).then(r=>r.json()).then(({iceServers})=>setIce(iceServers)).catch(()=>setIce(STUNS_FALLBACK)); },[iceUrl]);
 
   const room = useMemo(()=> new Room({ signalingUrl: wsUrl, iceServers: ice.length?ice:STUNS_FALLBACK, relayUrl }), [wsUrl, ice, relayUrl]);
   const roomRef = useRef(room);
-
-  room.onPeerData = (data) => { try {
-    const msg = JSON.parse(String(data));
-    if (msg.t === 'hello') { setMySide(msg.side === 0 ? 1 : 0); roomRef.current.send({ t:'sync', state: JSON.stringify(state) }); }
-    else if (msg.t === 'move') { const next = { ...state, board: state.board.map(r => r.slice()) } as any; next.board[msg.move.y][msg.move.x] = state.turn as 0|1; next.turn = (state.turn ^ 1) as 0|1; setState(next); }
-    else if (msg.t === 'sync') { setState(JSON.parse(msg.state)); }
-  } catch {} };
   room.onTransportChange = (t)=> setTransport(t);
-  room.onOpen = ()=> { setConnected(true); room.send({ t:'hello', game: gameId, side: mySide }); };
+  room.onOpen = ()=> { setConnected(true); room.send({ t:'hello', game: 'gomoku', side: mySide }); };
+  room.onPeerData = (data)=>{ try{ const msg=JSON.parse(String(data));
+    if(msg.t==='hello'){ setMySide(msg.side===0?1:0); roomRef.current.send({t:'sync',state:JSON.stringify(state)}); }
+    else if(msg.t==='move'){ const next={...state,board:state.board.map(r=>r.slice())} as any; next.board[msg.move.y][msg.move.x]=state.turn as 0|1; next.turn=(state.turn^1) as 0|1; setState(next); }
+    else if(msg.t==='sync'){ setState(JSON.parse(msg.state)); }
+  }catch{} };
 
-  const doHost = ()=>{ setMySide(0); room.connectAsHost(); const id=setInterval(()=>{ if(room.code){ setCode(room.code); clearInterval(id); } },100); };
+  const doHost = ()=>{ setMySide(0); room.connectAsHost(); const id=setInterval(()=>{ if(room.code){ setCode(room.code); clearInterval(id);} },100); };
   const doJoin = ()=>{ setMySide(1); room.connectAsGuest(code.trim().toUpperCase()); };
+  const forceRelay = ()=> room.forceRelay();
 
-  const onPlace=(x:number,y:number)=>{ const next={...state, board: state.board.map(r=>r.slice()) } as any; if(next.board[y][x]!==-1) return; next.board[y][x]=mySide; next.turn=(state.turn^1) as 0|1; setState(next); room.send({t:'move', move:{x,y}}); };
+  const onPlace=(x:number,y:number)=>{ const next={...state,board:state.board.map(r=>r.slice())} as any; if(next.board[y][x]!==-1) return; next.board[y][x]=mySide; next.turn=(state.turn^1) as 0|1; setState(next); room.send({t:'move',move:{x,y}}); };
 
   return (<div style={{ padding:24, maxWidth:900, margin:'0 auto' }}>
-    <h1 style={{ fontSize:22, fontWeight:700, marginBottom:6 }}>P2P Game Hub (Split-Ports)</h1>
-    <p style={{ fontSize:13, opacity:0.8, marginBottom:12 }}>HTTP:9000  WS:/signal@9001  WS:/relay@9002
+    <h1 style={{ fontSize:22, fontWeight:700, marginBottom:6 }}>P2P Game Hub (Split-Ports + TURN)</h1>
+    <p style={{ fontSize:13, opacity:0.8, marginBottom:12 }}>HTTP:9000  WS signal:9001  WS relay:9002
       <span style={{ marginLeft:8 }} className="tag">transport: {transport}</span>
     </p>
-    <div className="panel" style={{ display:'grid', gap:8, gridTemplateColumns:'1fr 1fr 2fr' }}>
-      <select className="input" value={gameId} onChange={e=> setGameId(e.target.value)}>
-        <option value={Gomoku.id}>{Gomoku.name}</option>
+    <div className="panel" style={{ display:'grid', gap:8, gridTemplateColumns:'1fr 1fr 2fr auto' }}>
+      <select className="input" value={'gomoku'} onChange={()=>{}}>
+        <option value="gomoku">Gomoku / 五子棋</option>
       </select>
       <button className="btn" onClick={doHost}>Host (get code)</button>
       <div style={{ display:'flex', gap:8 }}>
         <input className="input" placeholder="Enter Code" value={code} onChange={e=> setCode(e.target.value)} style={{ flex:1, textTransform:'uppercase' }} />
         <button className="btn" onClick={doJoin}>Join</button>
       </div>
+      <button className="btn" onClick={forceRelay} title="Force WS relay immediately">Force relay</button>
     </div>
     <div style={{ marginTop:8, fontSize:13 }}>Share this code: <b>{room.code}</b></div>
     <div style={{ marginTop:18 }}><GomokuBoard s={state} onPlace={onPlace} mySide={mySide} /></div>
-    <div style={{ marginTop:10, fontSize:13, color: connected ? 'green' : 'orange' }}>
-      {connected ? 'Connected' : 'Not connected'}
-    </div>
+    <div style={{ marginTop:10, fontSize:13, color: connected ? 'green' : 'orange' }}>{connected?'Connected':'Not connected'}</div>
   </div>);
 }

@@ -1,7 +1,7 @@
 {
-  "name": "p2p-gomoku-hub-split",
+  "name": "p2p-gomoku-hub-split-turn",
   "private": true,
-  "version": "0.1.0",
+  "version": "0.1.1",
   "scripts": {
     "postinstall": "cd app && npm i && cd ../server && npm i",
     "build": "cd app && npm run build",

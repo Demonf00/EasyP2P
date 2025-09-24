@@ -17,17 +17,33 @@ const WS_SIGNAL_PORT = Number(process.env.WS_SIGNAL_PORT || 9001);
 const WS_RELAY_PORT  = Number(process.env.WS_RELAY_PORT  || 9002);
 const ALLOW_ORIGIN = process.env.CORS_ORIGIN || '*';
 
-// ICE
-const STUN = { urls: [
+// ICE: STUN + requested TURNs (note: public TURN may be unreliable; kept as-is per request)
+const STUNS = { urls: [
   'stun:stun.l.google.com:19302',
   'stun:stun1.l.google.com:19302',
   'stun:stun2.l.google.com:19302',
   'stun:stun3.l.google.com:19302',
   'stun:stun4.l.google.com:19302'
 ]};
-const ICE_SERVERS = [STUN];
 
-// Express
+// Normalize env-provided TURNs if set (TURN_URLS=user:pass@host:port,host:port...)
+const ICE_SERVERS = [STUNS];
+
+// Add user-specified public TURNs
+ICE_SERVERS.push(
+  { urls: 'turn:freestun.net:3478', username: 'free', credential: 'free' },
+  { urls: 'turn:openrelay.metered.ca:80', username: 'openrelayproject', credential: 'openrelayproject' },
+  { urls: 'turn:turn.bistri.com:80', username: 'homeo', credential: 'homeo' },
+  { urls: 'turn:turn.anyfirewall.com:443?transport=tcp', username: 'webrtc', credential: 'webrtc' },
+  { urls: 'turn:numb.viagenie.ca', username: 'webrtc@live.com', credential: 'muazkh' }
+);
+
+// Allow overriding/adding TURN via env
+if (process.env.TURN_URLS && process.env.TURN_USER && process.env.TURN_PASS) {
+  const urls = process.env.TURN_URLS.split(',').map(s => s.trim()).filter(Boolean);
+  ICE_SERVERS.push({ urls, username: process.env.TURN_USER, credential: process.env.TURN_PASS });
+}
+
 const app = express();
 app.disable('x-powered-by');
 app.use(compression());
