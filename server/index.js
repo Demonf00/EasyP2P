@@ -10,10 +10,14 @@ import { fileURLToPath } from 'url';
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
 
-const PORT = Number(process.env.PORT || 8080);
+// HTTP for static + /ice
+const PORT = Number(process.env.HTTP_PORT || 9000);
 const HOST = process.env.HOST || '0.0.0.0';
+const WS_SIGNAL_PORT = Number(process.env.WS_SIGNAL_PORT || 9001);
+const WS_RELAY_PORT  = Number(process.env.WS_RELAY_PORT  || 9002);
 const ALLOW_ORIGIN = process.env.CORS_ORIGIN || '*';
 
+// ICE
 const STUN = { urls: [
   'stun:stun.l.google.com:19302',
   'stun:stun1.l.google.com:19302',
@@ -22,11 +26,8 @@ const STUN = { urls: [
   'stun:stun4.l.google.com:19302'
 ]};
 const ICE_SERVERS = [STUN];
-if (process.env.TURN_URLS && process.env.TURN_USER && process.env.TURN_PASS) {
-  const urls = process.env.TURN_URLS.split(',').map(s => s.trim()).filter(Boolean);
-  ICE_SERVERS.push({ urls, username: process.env.TURN_USER, credential: process.env.TURN_PASS });
-}
 
+// Express
 const app = express();
 app.disable('x-powered-by');
 app.use(compression());
@@ -37,9 +38,16 @@ const distDir = path.resolve(__dirname, '../app/dist');
 app.use(express.static(distDir));
 app.get('*', (_, res) => res.sendFile(path.join(distDir, 'index.html')));
 
-const server = createServer(app);
-const wssSignal = new WebSocketServer({ server, path: '/ws' });
-const wssRelay = new WebSocketServer({ server, path: '/relay' });
+const httpServer = createServer(app);
+httpServer.listen(PORT, HOST, () => {
+  console.log(`[hub] http://${HOST}:${PORT}  (static + /ice)`);
+  console.log(`[hub] ws signaling: ws://${HOST}:${WS_SIGNAL_PORT}`);
+  console.log(`[hub] ws relay:     ws://${HOST}:${WS_RELAY_PORT}`);
+});
+
+// ---- WS: signaling on dedicated port ----
+const wssSignal = new WebSocketServer({ host: HOST, port: WS_SIGNAL_PORT });
+const wssRelay  = new WebSocketServer({ host: HOST, port: WS_RELAY_PORT });
 
 const alphabet = '0123456789ABCDEFGHJKLMNPQRSTVWXYZ';
 const nanoid = customAlphabet(alphabet, 7);
@@ -49,13 +57,13 @@ function checksum(code) {
   return alphabet[a % alphabet.length];
 }
 
+// signaling rooms
 const rooms = new Map();
-
-wssSignal.on('connection', (ws) => {
+wssSignal.on('connection', (ws, req) => {
+  console.log('[ws] signaling connected from', req.socket.remoteAddress);
   ws.on('message', (buf) => {
     const raw = buf.toString();
     let msg; try { msg = JSON.parse(raw); } catch { return; }
-
     if (msg.type === 'create') {
       let base; do { base = nanoid(); } while (rooms.has(base));
       const code = base + checksum(base);
@@ -87,8 +95,10 @@ wssSignal.on('connection', (ws) => {
   });
 });
 
+// relay rooms
 const rrooms = new Map();
-wssRelay.on('connection', (ws) => {
+wssRelay.on('connection', (ws, req) => {
+  console.log('[ws] relay connected from', req.socket.remoteAddress);
   ws.on('message', (buf) => {
     try {
       const s = buf.toString();
@@ -113,8 +123,4 @@ wssRelay.on('connection', (ws) => {
     else for (const peer of set) if (peer.readyState === 1)
       peer.send(JSON.stringify({ type: 'peer-leave' }));
   });
-});
-
-server.listen(PORT, HOST, () => {
-  console.log(`[hub] http://${HOST}:${PORT}  (static + /ice + ws:/ws + ws:/relay)`);
 });

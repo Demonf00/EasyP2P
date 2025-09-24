@@ -1,12 +1,9 @@
 {
   "name": "p2p-gomoku-app",
   "private": true,
-  "version": "0.3.0",
+  "version": "0.3.1",
   "type": "module",
-  "scripts": {
-    "dev": "vite",
-    "build": "vite build"
-  },
+  "scripts": { "dev": "vite", "build": "vite build" },
   "dependencies": {
     "buffer": "^6.0.3",
     "nanoid": "^5.0.7",

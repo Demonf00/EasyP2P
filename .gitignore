@@ -3,4 +3,3 @@ app/node_modules/
 server/node_modules/
 app/dist/
 *.zip
-.DS_Store

@@ -1,5 +1,5 @@
 {
-  "name": "hub-server",
+  "name": "hub-server-split",
   "private": true,
   "type": "module",
   "version": "0.1.0",
