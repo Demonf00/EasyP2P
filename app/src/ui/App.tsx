@@ -63,6 +63,9 @@ export default function App() {
   };
 
   room.onOpen = () => { setConnected(true); room.send({ t: 'hello', game: gameId, side: mySide }); };
+  room.onError = (reason) => {
+    alert(reason === 'NO_ROOM' ? '房主还没创建房间，请稍后再点 Join。' : `信令错误：${reason}`);
+  };
 
   return (
     <div style={{ padding: 24, maxWidth: 900, margin: '0 auto' }}>

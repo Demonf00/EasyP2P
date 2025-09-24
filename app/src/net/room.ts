@@ -70,9 +70,23 @@ export class Room {
 
   close() { for (const p of this.peers) p.destroy(); this.ws?.close(); }
 
+  onError?: (reason: string) => void; // 新增回调
+
   private handleSignal(msg: any) {
     try { console.log('[ws] recv', msg); } catch {}
-    if (msg.type === 'created') { this.code = msg.code; }
+    if (msg.type === 'error') {
+      this.onError?.(msg.reason);
+      // 可选：1 秒后自动重试 Join（避免你先点了 Join 再去 Host）
+      if (msg.reason === 'NO_ROOM' && this.role === 'guest' && this.code) {
+        setTimeout(() => {
+          if (this.ws?.readyState === WebSocket.OPEN) {
+            this.ws.send(JSON.stringify({ type: 'join', code: this.code }));
+          }
+        }, 1000);
+      }
+      return;
+    }
+    else if (msg.type === 'created') { this.code = msg.code; }
     else if (msg.type === 'peer-join' && this.role === 'host') {
       // host initiates after a peer joins
       this.createPeer(true);
