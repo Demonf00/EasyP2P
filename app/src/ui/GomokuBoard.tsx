@@ -1,8 +1,6 @@
 import React from 'react';
 import type { GomokuState } from '../games/gomoku/rules';
-
 interface Props { s: GomokuState; onPlace: (x:number,y:number)=>void; mySide: 0|1; }
-
 export default function GomokuBoard({ s, onPlace, mySide }: Props) {
   const cellSize = 28;
   return (

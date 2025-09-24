@@ -10,7 +10,7 @@ const STUNS_FALLBACK: RTCIceServer[] = [
       'stun:stun1.l.google.com:19302',
       'stun:stun2.l.google.com:19302',
       'stun:stun3.l.google.com:19302',
-      'stun:stun4.l.google.com:19302',
+      'stun:stun4.l.google.com:19302'
     ] },
 ];
 
@@ -23,26 +23,9 @@ export default function App() {
   const [ice, setIce] = useState<RTCIceServer[]>([]);
   const [transport, setTransport] = useState<'webrtc' | 'relay'>('webrtc');
 
-  const envSignal = (import.meta as any).env?.VITE_SIGNALING_URL as string | undefined;
-  const envRelay = (import.meta as any).env?.VITE_RELAY_URL as string | undefined;
-
-  const { wsUrl, iceUrl, relayUrl } = useMemo(() => {
-    const isHttps = window.location.protocol === 'https:';
-    const host = window.location.hostname;
-    const port = window.location.port;
-    const wsScheme = isHttps ? 'wss' : 'ws';
-    const httpScheme = isHttps ? 'https' : 'http';
-
-    const auto = port === '5173'
-      ? { ws: `${wsScheme}://${host}:8788/ws`, ice: `${httpScheme}://${host}:8788/ice` }
-      : { ws: `${wsScheme}://${window.location.host}/ws`, ice: `${httpScheme}://${window.location.host}/ice` };
-
-    const ws = envSignal || auto.ws;
-    const ice = envSignal ? (new URL(envSignal).protocol === 'wss:' ? 'https:' : 'http:') + '//' + new URL(envSignal).host + '/ice' : auto.ice;
-    const relay = envRelay || (port === '5173' ? `${wsScheme}://${host}:8989/relay` : `${wsScheme}://${window.location.host}/relay`);
-
-    return { wsUrl: ws, iceUrl: ice, relayUrl: relay };
-  }, [envSignal, envRelay]);
+  const wsUrl = useMemo(() => `${location.protocol === 'https:' ? 'wss' : 'ws'}://${location.host}/ws`, []);
+  const iceUrl = useMemo(() => `${location.protocol}//${location.host}/ice`, []);
+  const relayUrl = useMemo(() => `${location.protocol === 'https:' ? 'wss' : 'ws'}://${location.host}/relay`, []);
 
   useEffect(() => {
     fetch(iceUrl).then(r => r.json())
@@ -58,18 +41,19 @@ export default function App() {
       const msg = JSON.parse(String(data));
       if (msg.t === 'hello') {
         setMySide(msg.side === 0 ? 1 : 0);
-        const g = games[gameId]; roomRef.current.send({ t:'sync', state: g.serialize(state) });
+        roomRef.current.send({ t:'sync', state: JSON.stringify(state) });
       } else if (msg.t === 'move') {
-        const g = games[gameId]; const next = g.apply(state, msg.move, (state.turn as 0|1));
+        const next = { ...state, board: state.board.map(r => r.slice()) } as any;
+        next.board[msg.move.y][msg.move.x] = state.turn as 0|1;
+        next.turn = (state.turn ^ 1) as 0|1;
         setState(next);
       } else if (msg.t === 'sync') {
-        const g = games[gameId]; setState(g.deserialize(msg.state));
+        setState(JSON.parse(msg.state));
       }
     } catch {}
   };
-  room.onError = (reason) => alert(reason === 'NO_ROOM' ? '房主还没创建房间，请稍后再点 Join。' : `信令错误：${reason}`);
-  room.onOpen = () => { setConnected(true); room.send({ t: 'hello', game: gameId, side: mySide }); };
   room.onTransportChange = (t) => setTransport(t);
+  room.onOpen = () => { setConnected(true); room.send({ t:'hello', game: gameId, side: mySide }); };
 
   const host = () => {
     setMySide(0);
@@ -81,23 +65,25 @@ export default function App() {
   const join = () => { setMySide(1); room.connectAsGuest(code.trim().toUpperCase()); };
 
   const onPlace = (x:number, y:number) => {
-    const g = games[gameId];
-    if (!g.isLegal(state, {x,y}, mySide)) return;
-    const next = g.apply(state, {x,y}, mySide);
+    const next = { ...state, board: state.board.map(r=> r.slice()) } as any;
+    if (next.board[y][x] !== -1) return;
+    next.board[y][x] = mySide;
+    next.turn = (state.turn ^ 1) as 0|1;
     setState(next);
     room.send({ t:'move', move: {x,y} });
   };
 
   return (
     <div style={{ padding: 24, maxWidth: 900, margin: '0 auto' }}>
-      <h1 style={{ fontSize: 22, fontWeight: 700, marginBottom: 6 }}>P2P Game Hub</h1>
+      <h1 style={{ fontSize: 22, fontWeight: 700, marginBottom: 6 }}>P2P Game Hub (One-Box)</h1>
       <p style={{ fontSize: 13, opacity: 0.8, marginBottom: 12 }}>
-        WebRTC first, auto-fallback to <b>WS Relay</b> (no TURN required). Transport: <span className="tag">{transport}</span>
+        Single command: static + signaling + <b>WS relay</b>. Transport auto: WebRTC → Relay.
+        <span style={{ marginLeft: 8 }} className="tag">transport: {transport}</span>
       </p>
 
       <div className="panel" style={{ display: 'grid', gap: 8, gridTemplateColumns: '1fr 1fr 2fr' }}>
         <select className="input" value={gameId} onChange={e=> setGameId(e.target.value)}>
-          {Object.values(games).map(g => <option key={g.id} value={g.id}>{g.name}</option>)}
+          <option value={Gomoku.id}>{Gomoku.name}</option>
         </select>
         <button className="btn" onClick={host}>Host (get code)</button>
         <div style={{ display: 'flex', gap: 8 }}>
@@ -115,7 +101,7 @@ export default function App() {
       </div>
 
       <div style={{ marginTop: 10, fontSize: 13, color: connected ? 'green' : 'orange' }}>
-        {connected ? 'Connected' : 'Not connected'}
+        {connected ? 'Connected' : 'Not connected'} (Host first, then Join with the same code)
       </div>
     </div>
   );

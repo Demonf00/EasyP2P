@@ -12,8 +12,3 @@ export interface Game<State, Move> {
   serialize(s: State): string;
   deserialize(text: string): State;
 }
-
-export type NetMessage =
-  | { t: 'hello'; game: string; side: PlayerID }
-  | { t: 'move'; move: any }
-  | { t: 'sync'; state: string };
