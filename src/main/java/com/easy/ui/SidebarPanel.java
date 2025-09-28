@@ -14,7 +14,8 @@ import java.util.Scanner;
 public class SidebarPanel extends JPanel {
     private final ConsoleSink log;
     private final JTextField inviteIn = new JTextField();
-    private final JTextArea inviteOut = new JTextArea(4, 20);
+    private final JTextField inviteOut = new JTextField();
+
     private GameType gameType = GameType.GOMOKU;
 
     private NetServer server;       // only one at a time
@@ -38,20 +39,19 @@ public class SidebarPanel extends JPanel {
 
         JButton copyBtn = new JButton("复制邀请码");
         copyBtn.addActionListener(e -> {
-            String text = inviteOut.getText();
+            String text = inviteOut.getText().replaceAll("\\s+","");
             Toolkit.getDefaultToolkit().getSystemClipboard()
                    .setContents(new java.awt.datatransfer.StringSelection(text), null);
             log.println("邀请码已复制到剪贴板");
         });
 
-        inviteOut.setLineWrap(true);
-        inviteOut.setWrapStyleWord(true);
+        inviteOut.setEditable(false);
 
         add(new JLabel("棋类选择"));
         add(gameSel);
         add(serverBtn);
         add(new JLabel("邀请码输出"));
-        add(new JScrollPane(inviteOut));
+        add(inviteOut);
         add(copyBtn);
         add(new JLabel("输入邀请码连接"));
         add(inviteIn);
@@ -91,7 +91,7 @@ public class SidebarPanel extends JPanel {
             client = new NetClient(log, (x,y) -> {
                 if (board != null) board.onOpponentMove(x,y);
             });
-            client.connect(inviteIn.getText().trim());
+            client.connect(inviteIn.getText().replaceAll("\s+",""));
             log.println("连接已建立");
             currentSender = client;
         } catch (Exception ex){

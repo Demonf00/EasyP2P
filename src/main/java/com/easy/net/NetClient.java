@@ -22,7 +22,7 @@ public class NetClient implements MoveSender {
     }
 
     public void connect(String inviteCode) throws Exception {
-        InviteCodec.Endpoint ep = InviteCodec.parse(inviteCode);
+        InviteCodec.Endpoint ep = InviteCodec.parse(inviteCode == null ? null : inviteCode.replaceAll("\s+",""));
         log.println("连接到 " + ep.ip + ":" + ep.port);
         s = new Socket();
         s.setTcpNoDelay(true);

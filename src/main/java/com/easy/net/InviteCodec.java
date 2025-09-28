@@ -15,16 +15,29 @@ public class InviteCodec {
         return AES256.encrypt(plain, KEY);
     }
 
-    public static Endpoint parse(String code) throws Exception {
-        String s = AES256.decrypt(code, KEY);
-        String[] parts = s.split("|");
-        String ip = null; int port = -1;
-        for (String p: parts) {
-            String[] kv = p.split("=", 2);
-            if (kv.length != 2) continue;
-            if ("ip".equals(kv[0])) ip = kv[1];
-            if ("port".equals(kv[0])) port = Integer.parseInt(kv[1]);
+
+public static Endpoint parse(String code) throws Exception {
+    if (code == null) throw new IllegalArgumentException("empty invite");
+    // Remove all whitespace/newlines users may paste
+    code = code.replaceAll("\s+", "");
+    String s = AES256.decrypt(code, KEY);
+    // Normalize payload spaces just in case
+    s = s.trim();
+    String[] parts = s.split("\|");
+    String ip = null; int port = -1;
+    for (String p: parts) {
+        String[] kv = p.split("=", 2);
+        if (kv.length != 2) continue;
+        String k = kv[0].trim(); String v = kv[1].trim();
+        if ("ip".equals(k)) ip = v;
+        if ("port".equals(k)) {
+            try { port = Integer.parseInt(v); } catch (Exception ignore) {}
         }
+    }
+    if (ip == null || port <= 0) throw new IllegalArgumentException("bad invite payload");
+    return new Endpoint(ip, port);
+}
+
         if (ip == null || port <= 0) throw new IllegalArgumentException("bad invite payload");
         return new Endpoint(ip, port);
     }
