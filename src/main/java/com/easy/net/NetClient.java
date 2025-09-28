@@ -41,7 +41,7 @@ public class NetClient implements MoveSender {
         socket.setKeepAlive(true);
         log.println("[CLIENT] connecting to " + ep.ip + ":" + ep.port + " ...");
         socket.connect(new InetSocketAddress(ep.ip, ep.port), 10_000);
-        socket.setSoTimeout(120_000); // 读超时
+        socket.setSoTimeout(1_200_000); // 读超时
         log.println("[CLIENT] connected. local=" + socket.getLocalSocketAddress());
 
         // 3) 构造 IO
