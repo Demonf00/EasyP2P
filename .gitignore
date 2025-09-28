@@ -1,5 +1,22 @@
-node_modules/
-app/node_modules/
-server/node_modules/
-app/dist/
-*.zip
+# Maven
+/target/
+!.mvn/wrapper/maven-wrapper.jar
+
+# IDEs
+*.iml
+.idea/
+*.ipr
+*.iws
+.project
+.classpath
+.settings/
+
+# OS
+.DS_Store
+Thumbs.db
+
+# Logs
+*.log
+
+# Build/Run
+*.jar

@@ -1,47 +1,33 @@
-# P2P Gomoku Hub — WebRTC first, WS Relay fallback
+# easy-p2p
 
-- **WebRTC (STUN only)** path tries first.
-- If it cannot connect within ~7s (e.g., symmetric NAT, no TURN), it **falls back to WS Relay**.
-- The relay is a simple Java WebSocket server (module `java-relay`) you can run on any machine and expose via port forwarding.
-- This mirrors your idea of using your existing Java NAT helper, but in a browser-compatible way (WebSocket).
+Port-forwarding P2P demo with **invite code**, **console log**, **sidebar game selection**, and **board canvas** (Gomoku-style). No STUN/TURN/ZeroTier required. Use manual port forwarding or IPv6.
 
-## Dev quick start
-
-### Signaling (Node, room code + /ice)
-```powershell
-cd signaling-server
-$env:BIND_HOST="0.0.0.0"
-$env:PORT="8788"
-npm i
-npm start
-```
-
-### Java WS Relay (no TURN needed)
+## Build
 ```bash
-cd java-relay
-mvn -q -DskipTests package
-java -jar target/ws-relay-0.1.0.jar -Dhost=0.0.0.0 -Dport=8989
-# Forward 8989 from your router to this host for cross-network play
+mvn -v          # ensure Maven is installed
+mvn clean package
 ```
 
-### Frontend
-```powershell
-cd app
-npm i
-npm run build
-npm run preview -- --host 0.0.0.0 --port 5173
+This produces a fat JAR:
 ```
-Open http://<your-ip>:5173 and play.  
-(You can override endpoints with `.env.local`: `VITE_SIGNALING_URL`, `VITE_RELAY_URL`).
+target/easy-p2p-1.0.0-shaded.jar
+```
 
-## Production
-- Serve frontend over **HTTPS**.
-- Reverse-proxy:
-  - WSS signaling at `/ws` → Node server 8788
-  - WSS relay at `/relay` → Java relay 8989
-  - `/ice` → Node server 8788
-- No TURN needed (relay will be used when WebRTC fails).
+## Run
+### Server (generate invite)
+```
+java -jar target/easy-p2p-1.0.0-shaded.jar
+```
+Click “我是服务器(生成邀请码)” → copy the invite code and send to your peer.
+Make sure your router forwards the selected TCP port (default 2266) to your host.
 
-## Why this works
-Browsers cannot use your raw TCP/UDP forwarder directly. WebRTC without TURN may fail across certain NATs.
-This relay keeps your **“两端不同网段也能玩”**目标，同时完全兼容浏览器（WebSocket）。
+### Client (paste invite)
+```
+java -jar target/easy-p2p-1.0.0-shaded.jar
+```
+Paste the invite code and click connect.
+
+## Notes
+- The app fetches your public IPv4 via `checkip.amazonaws.com` for invite code.
+- Use manual port forwarding (IPv4) or allow inbound (IPv6) in your router/firewall.
+- Invite is AES-256-CBC (+ Base64). You can rotate the key in `InviteCodec`.
