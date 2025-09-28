@@ -18,15 +18,39 @@ public class BoardCanvas extends JPanel implements MoveListener, NetEventListene
         setPreferredSize(new Dimension(560, 560));
         setGame(GameType.GOMOKU, true); // default
 
-        addMouseListener(new MouseAdapter(){
-            @Override public void mouseClicked(MouseEvent e){
+        addMouseListener(new MouseAdapter() {
+            @Override public void mouseClicked(MouseEvent e) {
                 if (game == null) return;
-                int cell = Math.max(24, Math.min(48, Math.min(getWidth(), getHeight()) / game.size()));
-                int x = e.getX()/cell; int y = e.getY()/cell;
-                if (!game.myTurn()) { log.println("现在不是你的回合"); return; }
-                if (game.play(x,y)) {
+
+                int n = game.size();
+                int cell = Math.max(24, Math.min(48, Math.min(getWidth(), getHeight()) / n));
+                int w = cell * n, h = cell * n;
+                int x0 = (getWidth()  - w) / 2;
+                int y0 = (getHeight() - h) / 2;
+
+                // 把鼠标坐标映射到棋盘坐标系
+                int px = e.getX() - x0;
+                int py = e.getY() - y0;
+
+                // 点击在棋盘之外则忽略
+                if (px < 0 || py < 0 || px >= w || py >= h) return;
+
+                // 转为格子索引（0..n-1）
+                int x = px / cell;
+                int y = py / cell;
+
+                if (!game.myTurn()) { 
+                    log.println("现在不是你的回合"); 
+                    return; 
+                }
+
+                if (game.play(x, y)) {
                     repaint();
-                    try { sender.sendMove(x,y,0,""); } catch(Exception ex){ log.println("发送落子失败: " + ex.getMessage()); }
+                    try {
+                        sender.sendMove(x, y, 0, "");
+                    } catch (Exception ex) {
+                        log.println("发送落子失败: " + ex.getMessage());
+                    }
                     afterMoveCheck();
                 } else {
                     log.println("此处不可落子");

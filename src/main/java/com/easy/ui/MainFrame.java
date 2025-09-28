@@ -6,16 +6,22 @@ import com.easy.net.*;
 import java.awt.*;
 
 public class MainFrame extends JFrame implements ConsoleSink {
+    private JPanel top;
     private JComponent selector;
     private void switchSelector(boolean isHost){
-        Container parent = selector.getParent();
-        if (parent != null) parent.remove(selector);
+        if (selector != null) {
+            top.remove(selector);
+        }
+        // 根据角色放入新的（host=选择；client=建议）
         selector = new GameSelectorPanel(isHost, this::hostSelectGame, this::clientSuggestGame);
-        ((JPanel)((BorderLayout)((Container)parent).getLayout()).getLayoutComponent(java.awt.BorderLayout.CENTER)).add(selector, java.awt.BorderLayout.EAST);
-        // Rebuild layout
-        this.revalidate(); this.repaint();
+        top.add(selector, BorderLayout.EAST);
+
+        // 刷新布局 & 文案
+        this.revalidate();
+        this.repaint();
         println(isHost ? "你是房主：可以选择游戏" : "你是客户端：可以建议游戏");
-        // 记录我方是host还是client
+
+        // 告知棋盘我方是否为 host（影响先后手提示等）
         board.setHost(isHost);
     }
     private final ConsolePanel console = new ConsolePanel();
@@ -29,16 +35,24 @@ public class MainFrame extends JFrame implements ConsoleSink {
 
         // board needs current MoveSender
         board = 
-new BoardCanvas(new com.easy.ui.MoveSender(){
-    @Override public void sendMove(int x,int y,int turn,String hash) throws java.io.IOException {
-        MoveSender sender = sidebar.getCurrentSender();
-        if (sender == null) throw new java.io.IOException("尚未建立连接");
-        sender.sendMove(x,y,turn,hash);
-    }
-}, this);
+        new BoardCanvas(new com.easy.ui.MoveSender(){
+            @Override public void sendMove(int x,int y,int turn,String hash) throws java.io.IOException {
+                MoveSender sender = sidebar.getCurrentSender();
+                if (sender == null) throw new java.io.IOException("尚未建立连接");
+                sender.sendMove(x,y,turn,hash);
+            }
+        }, this);
 
         sidebar.setBoard(board);
         sidebar.onRoleKnown(isHost -> switchSelector(isHost));
+
+        top = new JPanel(new BorderLayout(8,8));
+        top.add(sidebar, BorderLayout.WEST);
+        top.add(board,   BorderLayout.CENTER);
+
+        selector = new GameSelectorPanel(false, this::hostSelectGame, this::clientSuggestGame);
+        top.add(selector, BorderLayout.EAST);
+        sidebar.onRoleKnown(this::switchSelector);
 
         add(sidebar, BorderLayout.WEST);
         add(board, BorderLayout.CENTER);
