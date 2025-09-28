@@ -3,6 +3,8 @@ package com.easy.net;
 import com.easy.util.AES256;
 import java.time.Instant;
 import java.util.*;
+import java.util.regex.Matcher;
+import java.util.regex.Pattern;
 
 public class InviteCodec {
     // 32-byte key; replace in prod (env/config). DO NOT commit secrets in real apps.
@@ -16,32 +18,47 @@ public class InviteCodec {
     }
 
 
+
+
 public static Endpoint parse(String code) throws Exception {
     if (code == null) throw new IllegalArgumentException("empty invite");
-    // Remove all whitespace/newlines users may paste
+    String original = code;
     code = code.replaceAll("\s+", "");
-    String s = AES256.decrypt(code, KEY);
-    // Normalize payload spaces just in case
-    s = s.trim();
-    String[] parts = s.split("\|");
-    String ip = null; int port = -1;
-    for (String p: parts) {
-        String[] kv = p.split("=", 2);
-        if (kv.length != 2) continue;
-        String k = kv[0].trim(); String v = kv[1].trim();
-        if ("ip".equals(k)) ip = v;
-        if ("port".equals(k)) {
-            try { port = Integer.parseInt(v); } catch (Exception ignore) {}
-        }
+
+    String s;
+    try {
+        s = AES256.decrypt(code, KEY);
+    } catch (Exception e) {
+        String msg = e.getClass().getSimpleName() + (e.getMessage() == null ? "" : (": " + e.getMessage()));
+        throw new IllegalArgumentException("decrypt failed (" + msg + "). Hint: ensure full single-line code.");
     }
-    if (ip == null || port <= 0) throw new IllegalArgumentException("bad invite payload");
+    if (s == null) throw new IllegalArgumentException("decrypted payload is null");
+
+    String payload = s.trim();
+    // Robustly extract using regex to avoid split pitfalls
+    Pattern ipPat   = Pattern.compile("(^|\\|)ip=([^|]+)($|\\|)");
+    Pattern portPat = Pattern.compile("(^|\\|)port=([0-9]{1,5})($|\\|)");
+
+
+    Matcher m1 = ipPat.matcher(payload);
+    Matcher m2 = portPat.matcher(payload);
+
+    String ip = null;
+    Integer port = null;
+
+    if (m1.find()) ip = m1.group(2).trim();
+    if (m2.find()) {
+        try { port = Integer.parseInt(m2.group(2)); } catch (NumberFormatException ignore) {}
+    }
+
+    if (ip == null || ip.isEmpty()) {
+        throw new IllegalArgumentException("missing ip in payload (payload='" + payload + "', code='" + original + "')");
+    }
+    if (port == null || port <= 0 || port > 65535) {
+        throw new IllegalArgumentException("missing/invalid port in payload (payload='" + payload + "', code='" + original + "')");
+    }
     return new Endpoint(ip, port);
 }
-
-        if (ip == null || port <= 0) throw new IllegalArgumentException("bad invite payload");
-        return new Endpoint(ip, port);
-    }
-
     public static class Endpoint {
         public final String ip;
         public final int port;
