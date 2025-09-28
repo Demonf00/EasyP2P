@@ -5,6 +5,9 @@ import java.awt.*;
 
 import com.easy.game.GameType;
 import com.easy.ui.MoveSender;
+
+import com.easy.ui.GameStartPolicy;
+
 import com.easy.net.NetClient;
 import com.easy.net.NetServer;
 import com.easy.net.Proto;
@@ -81,18 +84,32 @@ public class MainFrame extends JFrame implements ConsoleSink {
     // 房主点击右侧按钮 -> 选择游戏并广播给客户端
     private void hostSelectGame(GameType type) {
         println("房主选择游戏：" + type);
+
+        // 1) 从全局策略拿本局先手
+        boolean thisRoundHostStart = GameStartPolicy.nextStartIsHost();
+
+        // 2) 先本地应用（EDT），再广播
+        javax.swing.SwingUtilities.invokeLater(() -> {
+            board.onGameSelected(type, thisRoundHostStart ? "host" : "client");
+        });
+
+        // 3) 发给对端
         try {
-            NetServer s = getServerIfAny();
+            com.easy.net.NetServer s = getServerIfAny();
             if (s != null) {
-                s.sendJson(Proto.gameSelect(type.name(), "host"));
-                // 本地立即应用
-                board.onGameSelected(type, "host");
+                s.sendJson(com.easy.net.Proto.gameSelect(type.name(),
+                        thisRoundHostStart ? "host" : "client"));
+            } else {
+                println("当前不是房主，无法选择，只能建议。");
                 return;
             }
-            println("当前非房主，无法选择，只能建议。");
         } catch (Exception ex) {
             println("发送游戏选择失败: " + ex.getMessage());
+            return;
         }
+
+        // 4) 开始一局 -> 消耗并翻转先手到下一局
+        GameStartPolicy.consumeAndFlip();
     }
 
     // 客户端点击右侧按钮 -> 仅发送建议

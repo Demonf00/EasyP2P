@@ -103,7 +103,8 @@ public class BoardCanvas extends JPanel implements MoveListener, NetEventListene
         else game = new GomokuGame();
 
         game.reset(iStart);
-        lastMine = lastOpp = sel = null;
+        try { game.setMyTurn(iStart); } catch (Throwable ignore){}
+
         log.println("游戏开始：" + type + "，" + (iStart ? "你先手" : "你后手"));
         repaint();
     }
@@ -114,52 +115,45 @@ public class BoardCanvas extends JPanel implements MoveListener, NetEventListene
     public void onOpponentMove(int x, int y){
         // 普通棋（无起点）
         if (game == null) return;
-        if (game.type() == GameType.CHESS) {
-            // 西洋棋应当带 fx/fy，这里当作兜底：不处理
-            log.println("收到对方落子但缺少起点（忽略）");
-            return;
-        }
-        if (game.play(x,y)) {
-            lastOpp = new Point(x,y);
-            repaint();
-            afterMoveCheck();
-        }
+        javax.swing.SwingUtilities.invokeLater(() -> {
+            if (game.play(x,y)){
+                lastOpp = new java.awt.Point(x,y);
+                repaint();
+                afterMoveCheck();
+            }
+        });
     }
 
     /** 新增：带起点的对方走子（用于 Chess/Checkers 等） */
     public void onOpponentMoveFxFy(int fx,int fy,int x,int y){
-    if (game == null) return;
-    switch (game.type()){
-        case CHESS -> {
-            ChessGame cg = (ChessGame) game;
-            if (cg.moveFromPeer(fx,fy,x,y)) {
-                lastOpp = new java.awt.Point(x,y);
-                repaint();
-                afterMoveCheck();
-            } else {
-                log.println("对方走子非法（已忽略）");
+        if (game == null) return;
+        javax.swing.SwingUtilities.invokeLater(() -> {
+            switch (game.type()){
+                case CHESS -> {
+                    com.easy.game.ChessGame cg = (com.easy.game.ChessGame) game;
+                    if (cg.moveFromPeer(fx,fy,x,y)) {
+                        lastOpp = new java.awt.Point(x,y);
+                        repaint();
+                        afterMoveCheck();
+                    }
+                }
+                case CHECKERS -> {
+                    com.easy.game.CheckersGame ck = (com.easy.game.CheckersGame) game;
+                    if (ck.moveFromPeer(fx,fy,x,y)) {
+                        lastOpp = new java.awt.Point(x,y);
+                        repaint();
+                        afterMoveCheck();
+                    }
+                }
+                default -> {
+                    if (game.play(x,y)) {
+                        lastOpp = new java.awt.Point(x,y);
+                        repaint(); afterMoveCheck();
+                    }
+                }
             }
-        }
-        case CHECKERS -> {
-            CheckersGame ck = (CheckersGame) game;
-            if (ck.moveFromPeer(fx,fy,x,y)) {
-                lastOpp = new java.awt.Point(x,y);
-                repaint();
-                afterMoveCheck();
-            } else {
-                log.println("对方走子非法（已忽略）");
-            }
-        }
-        default -> {
-            // 其它棋按两参处理
-            if (game.play(x,y)) {
-                lastOpp = new java.awt.Point(x,y);
-                repaint();
-                afterMoveCheck();
-            }
-        }
+        });
     }
-}
 
     // === 本地交互：Chess/Checkers/Battle ===
 
@@ -232,10 +226,10 @@ public class BoardCanvas extends JPanel implements MoveListener, NetEventListene
 
     // === NetEventListener ===
     @Override
-    public void onGameSelected(GameType type, String starter){
+    public void onGameSelected(com.easy.game.GameType type, String starter){
         boolean hostStart = "host".equalsIgnoreCase(starter);
         boolean iStart = hostStart == hostSide;
-        setGame(type, iStart);
+        javax.swing.SwingUtilities.invokeLater(() -> setGame(type, iStart));
     }
     @Override
     public void onGameSuggested(GameType type){

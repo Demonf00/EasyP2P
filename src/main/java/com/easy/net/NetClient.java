@@ -113,9 +113,12 @@ public class NetClient implements MoveSender {
                         String g = jo.optString("game", "GOMOKU");
                         String starter = jo.optString("starter", "host");
                         if (events != null) {
-                            if ("select".equals(cmd)) events.onGameSelected(com.easy.game.GameType.from(g), starter);
-                            else if ("suggest".equals(cmd)) events.onGameSuggested(com.easy.game.GameType.from(g));
-                            else if ("reset".equals(cmd)) events.onGameSelected(com.easy.game.GameType.from(g), "host");
+                            javax.swing.SwingUtilities.invokeLater(() ->
+                                    events.onGameSelected(com.easy.game.GameType.from(g), starter)
+                                );
+                            // if ("select".equals(cmd)) events.onGameSelected(com.easy.game.GameType.from(g), starter);
+                            // else if ("suggest".equals(cmd)) events.onGameSuggested(com.easy.game.GameType.from(g));
+                            // else if ("reset".equals(cmd)) events.onGameSelected(com.easy.game.GameType.from(g), "host");
                         }
                         log.println("[CLIENT] 收到游戏事件: " + jo);
                     } else if ("BATTLE".equals(type)) {

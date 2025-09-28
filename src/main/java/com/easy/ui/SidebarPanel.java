@@ -5,6 +5,8 @@ import com.easy.net.NetClient;
 import com.easy.net.NetServer;
 import com.easy.net.UpnpHelper;
 
+import com.easy.ui.GameStartPolicy;
+
 import javax.swing.*;
 import java.awt.*;
 import java.net.HttpURLConnection;
@@ -65,7 +67,32 @@ public class SidebarPanel extends JPanel {
 
         JButton resetBtn = new JButton("重置整局");
         resetBtn.setPreferredSize(btnSize);
-        resetBtn.addActionListener(e -> doReset());
+        resetBtn.addActionListener(e -> {
+            if (board == null) return;
+            com.easy.game.GameType type = board.currentType();
+
+            boolean thisRoundHostStart = GameStartPolicy.nextStartIsHost();
+
+            // 本地先落地
+            javax.swing.SwingUtilities.invokeLater(() ->
+                board.onGameSelected(type, thisRoundHostStart ? "host" : "client"));
+
+            // 广播给对端
+            try {
+                if (server != null) {
+                    server.sendJson(com.easy.net.Proto.gameSelect(type.name(),
+                            thisRoundHostStart ? "host" : "client"));
+                } else if (client != null) {
+                    // 客户端发 reset 只有在你做了允许时才有意义；默认：仅房主能“开始一局”
+                    log.println("当前为客户端，重置请由房主发起。");
+                }
+            } catch (Exception ex){
+                log.println("发送重置失败: " + ex.getMessage());
+            }
+
+            // 翻转到下一局
+            GameStartPolicy.consumeAndFlip();
+        });
         add(resetBtn);
 
         add(new JLabel("提示：初始阶段仅连接，不预先选择棋类（房主稍后选择）。"));
