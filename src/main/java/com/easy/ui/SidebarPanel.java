@@ -104,7 +104,7 @@ public class SidebarPanel extends JPanel {
             }
             String code = InviteCodec.gen(ip, port);
             inviteOut.setText(code);
-            log.println((lanBtn.isSelected() ? "局域网" : "公网") + " IP " + ip + " 端口 " + port + " 已生成邀请码");
+            log.println((lanBtn.isSelected() ? "局域网" : "公网") + " IP " + ip + " 端口 " + port + " 已生成邀请码（LAN 使用默认出网接口）");
 
             server = new NetServer(port, log, (x,y) -> {
                 if (board != null) board.onOpponentMove(x,y);
@@ -140,20 +140,31 @@ public class SidebarPanel extends JPanel {
         }
     }
 
-    private static String getLanIPv4() throws Exception {
-        // find a site-local IPv4 that's not loopback
-        Enumeration<NetworkInterface> ifs = NetworkInterface.getNetworkInterfaces();
+    
+private static String getLanIPv4() {
+    // Prefer default-route interface via UDP "connect" (no packets actually sent)
+    try (java.net.DatagramSocket ds = new java.net.DatagramSocket()) {
+        ds.connect(java.net.InetAddress.getByName("192.0.2.1"), 9); // TEST-NET-1 (RFC 5737)
+        java.net.InetAddress local = ((java.net.InetSocketAddress) ds.getLocalSocketAddress()).getAddress();
+        if (local instanceof java.net.Inet4Address && local.isSiteLocalAddress()) {
+            return local.getHostAddress();
+        }
+    } catch (Exception ignore) { }
+    // Fallback: enumerate physical interfaces
+    try {
+        java.util.Enumeration<java.net.NetworkInterface> ifs = java.net.NetworkInterface.getNetworkInterfaces();
         while (ifs.hasMoreElements()) {
-            NetworkInterface nif = ifs.nextElement();
-            if (!nif.isUp() || nif.isLoopback() || nif.isVirtual()) continue;
-            Enumeration<InetAddress> addrs = nif.getInetAddresses();
+            java.net.NetworkInterface nif = ifs.nextElement();
+            if (!nif.isUp() || nif.isLoopback() || nif.isVirtual() || nif.isPointToPoint()) continue;
+            java.util.Enumeration<java.net.InetAddress> addrs = nif.getInetAddresses();
             while (addrs.hasMoreElements()) {
-                InetAddress a = addrs.nextElement();
-                if (a instanceof Inet4Address && a.isSiteLocalAddress() && !a.isLoopbackAddress()) {
+                java.net.InetAddress a = addrs.nextElement();
+                if (a instanceof java.net.Inet4Address && a.isSiteLocalAddress() && !a.isLoopbackAddress()) {
                     return a.getHostAddress();
                 }
             }
         }
-        return null;
-    }
+    } catch (Exception ignore) { }
+    return null;
+}
 }
