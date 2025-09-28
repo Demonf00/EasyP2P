@@ -3,14 +3,17 @@ package com.easy.net;
 import com.easy.ui.ConsoleSink;
 import com.easy.ui.MoveListener;
 import com.easy.ui.NetEventListener;
-// 关键：明确 import UI 包里的 MoveSender 接口
 import com.easy.ui.MoveSender;
+import org.json.JSONObject;
 
 import java.io.*;
 import java.net.ServerSocket;
 import java.net.Socket;
+import java.net.SocketTimeoutException;
 
-public class NetServer implements MoveSender {   // 关键：实现 com.easy.ui.MoveSender
+/** 纯文本 JSON 协议的单连接服务器（与客户端一致） */
+public class NetServer implements MoveSender {
+
     private final int port;
     private final ConsoleSink log;
     private final MoveListener moveListener;
@@ -18,9 +21,10 @@ public class NetServer implements MoveSender {   // 关键：实现 com.easy.ui.
 
     private volatile boolean running = false;
     private ServerSocket serverSocket;
+
     private Socket socket;
-    private ObjectOutputStream out;
-    private ObjectInputStream  in;
+    private BufferedReader br;
+    private OutputStream out;
 
     private boolean upnpEnabled = false;
     public void setUpnpEnabled(boolean enabled){ this.upnpEnabled = enabled; }
@@ -35,24 +39,36 @@ public class NetServer implements MoveSender {   // 关键：实现 com.easy.ui.
 
         Thread t = new Thread(() -> {
             log.println("服务器监听端口: " + port + "，等待客户端连接...");
-            while (running) {                      // ← 保持 accept 循环，客户端断了继续等下一个
+            while (running) {
                 try {
                     socket = serverSocket.accept();
-                    out = new ObjectOutputStream(socket.getOutputStream());
-                    in  = new ObjectInputStream(socket.getInputStream());
-                    log.println("客户端已连接: " + socket.getInetAddress().getHostAddress());
-                    Proto.sendJSON(out, Proto.hello("server"));
+                    socket.setTcpNoDelay(true);
+                    socket.setKeepAlive(true);
+                    socket.setSoTimeout(15_000); // 读超时，避免读阻塞
+                    log.println("[SERVER] accepted from " + socket.getRemoteSocketAddress());
 
-                    // 读循环
+                    br  = new BufferedReader(new InputStreamReader(socket.getInputStream(), "UTF-8"));
+                    out = socket.getOutputStream();
+
+                    // 发送 HELLO
+                    log.println("[SERVER] sending HELLO...");
+                    Proto.sendJSON(out, Proto.hello("server"));
+                    log.println("[SERVER] HELLO sent.");
+
+                    // 进入读循环
+                    log.println("[SERVER] entering read loop...");
                     while (running && !socket.isClosed()) {
-                        Object obj = in.readObject();
-                        org.json.JSONObject jo = (obj instanceof org.json.JSONObject)
-                                ? (org.json.JSONObject) obj
-                                : new org.json.JSONObject(String.valueOf(obj));
+                        JSONObject jo = Proto.readJSON(br); // null 表示对端关闭
+                        if (jo == null) {
+                            log.println("[SERVER] read JSON -> null，对端关闭？");
+                            break;
+                        }
+                        log.println("[SERVER] received: " + jo);
 
                         String type = jo.optString("type","");
                         if ("MOVE".equals(type)) {
-                            if (moveListener != null) moveListener.onOpponentMove(jo.getInt("x"), jo.getInt("y"));
+                            int x = jo.getInt("x"), y = jo.getInt("y");
+                            if (moveListener != null) moveListener.onOpponentMove(x, y);
                         } else if ("GAME".equals(type)) {
                             String cmd = jo.optString("cmd","");
                             String g = jo.optString("game","GOMOKU");
@@ -60,33 +76,39 @@ public class NetServer implements MoveSender {   // 关键：实现 com.easy.ui.
                             if (events != null) {
                                 if ("select".equals(cmd)) events.onGameSelected(com.easy.game.GameType.from(g), starter);
                                 else if ("suggest".equals(cmd)) events.onGameSuggested(com.easy.game.GameType.from(g));
+                                else if ("reset".equals(cmd))  events.onGameSelected(com.easy.game.GameType.from(g), "host");
                             }
-                            log.println("收到事件: " + jo.toString());
+                        } else if ("HELLO".equals(type)) {
+                            // 对端 HELLO
                         } else if ("BATTLE".equals(type)) {
-                            log.println("收到事件: " + jo.toString());
+                            // 先日志透传；需要的话可在此做服务端裁决
+                        } else if ("ACK".equals(type)) {
+                            // 可忽略
+                        } else {
+                            log.println("[SERVER] 未识别消息: " + jo);
                         }
                     }
+                } catch (SocketTimeoutException te) {
+                    log.println("[SERVER] read timeout: " + te.getMessage());
                 } catch (EOFException eof) {
-                    log.println("对端已正常断开");
+                    log.println("[SERVER] peer closed: " + eof.getMessage());
                 } catch (Exception e) {
-                    // 打出异常类型 + 栈，方便你定位
-                    log.println("服务器异常: " + e.getClass().getName() + ": " + String.valueOf(e.getMessage()));
+                    log.println("[SERVER] exception: " + e.getClass().getName() + ": " + String.valueOf(e.getMessage()));
                     StringWriter sw = new StringWriter();
                     e.printStackTrace(new PrintWriter(sw));
                     log.println(sw.toString());
                 } finally {
-                    try { if (in!=null) in.close(); } catch (Exception ignore){}
-                    try { if (out!=null) out.close(); } catch (Exception ignore){}
-                    try { if (socket!=null) socket.close(); } catch (Exception ignore){}
-                    // 不要在这里把 serverSocket 关掉，这样还能继续 accept
+                    try { if (br != null) br.close(); } catch (Exception ignore){}
+                    try { if (out != null) out.close(); } catch (Exception ignore){}
+                    try { if (socket != null) socket.close(); } catch (Exception ignore){}
+                    // 不关闭 serverSocket；继续下一轮 accept
                 }
-                // 回到 while(running) 再次等待下一个客户端
             }
 
-            // 真正停止服务器
-            try { if (serverSocket!=null) serverSocket.close(); } catch (Exception ignore){}
+            // 停服与回收 UPnP
+            try { if (serverSocket != null) serverSocket.close(); } catch (Exception ignore){}
             if (upnpEnabled) {
-                try { com.easy.net.UpnpHelper.closeTcp(port); log.println("已回收 UPnP 端口映射: " + port); } catch (Exception ignore){}
+                try { UpnpHelper.closeTcp(port); log.println("已回收 UPnP 端口映射: " + port); } catch (Exception ignore){}
             }
             log.println("服务器已关闭");
         }, "easy-netserver");
@@ -94,21 +116,24 @@ public class NetServer implements MoveSender {   // 关键：实现 com.easy.ui.
         t.start();
     }
 
-    public void stopServer() {
+    public void stopServer(){
         running = false;
-        try { if (socket!=null) socket.close(); } catch (Exception ignore){}
-        try { if (serverSocket!=null) serverSocket.close(); } catch (Exception ignore){}
+        try { if (socket != null) socket.close(); } catch (Exception ignore){}
+        try { if (serverSocket != null) serverSocket.close(); } catch (Exception ignore){}
     }
 
     public void closeUpnpIfAny(){
-        if (upnpEnabled) { try { com.easy.net.UpnpHelper.closeTcp(port); } catch (Exception ignore){} }
+        if (upnpEnabled) { try { UpnpHelper.closeTcp(port); } catch (Exception ignore){} }
     }
 
-    @Override public void sendMove(int x, int y, int turn, String hash) throws IOException {
+    // ===== MoveSender 实现（发 JSON）=====
+    @Override
+    public void sendMove(int x, int y, int turn, String hash) throws IOException {
         if (out == null) throw new IOException("尚未连接");
-        Proto.sendJSON(out, Proto.move(x,y,turn,hash));
+        Proto.sendJSON(out, Proto.move(x, y, turn, hash));
     }
-    public void sendJson(org.json.JSONObject jo) throws IOException {
+
+    public void sendJson(JSONObject jo) throws IOException {
         if (out == null) throw new IOException("尚未连接");
         Proto.sendJSON(out, jo);
     }
