@@ -44,7 +44,7 @@ public class NetServer implements MoveSender {
                     socket = serverSocket.accept();
                     socket.setTcpNoDelay(true);
                     socket.setKeepAlive(true);
-                    socket.setSoTimeout(15_000); // 读超时，避免读阻塞
+                    socket.setSoTimeout(120_000); // 读超时，避免读阻塞
                     log.println("[SERVER] accepted from " + socket.getRemoteSocketAddress());
 
                     br  = new BufferedReader(new InputStreamReader(socket.getInputStream(), "UTF-8"));
