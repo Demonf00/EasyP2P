@@ -1,9 +1,12 @@
 package com.easy.ui;
 
 import javax.swing.*;
+import com.easy.game.*;
+import com.easy.net.*;
 import java.awt.*;
 
 public class MainFrame extends JFrame implements ConsoleSink {
+    private JComponent selector;
     private final ConsolePanel console = new ConsolePanel();
     private final SidebarPanel sidebar = new SidebarPanel(this);
     private BoardCanvas board;
@@ -36,5 +39,61 @@ new BoardCanvas(new com.easy.ui.MoveSender(){
     @Override
     public void println(String s){
         console.println(s);
+    }
+
+
+    // Called when host selects a game from selector
+    private void hostSelectGame(GameType type){
+        println("房主选择游戏：" + type);
+        MoveSender sender = sidebar.getCurrentSender();
+        if (sender instanceof NetServer) {
+            try {
+                java.io.OutputStream out = ((NetServer)sender).getClass().getDeclaredField("out")!=null ? null : null;
+            } catch (Exception ignore){}
+        }
+        // Send a GAME select over whichever side we're on
+        try {
+            com.easy.net.NetServer s = getServerIfAny();
+            com.easy.net.NetClient c = getClientIfAny();
+            String starter = "host";
+            if (s != null) {
+                // I'm host: send to client
+                s.sendJson(com.easy.net.Proto.gameSelect(type.name(), starter));
+            } else if (c != null) {
+                // If I'm client but UI仍显示host选择，忽略
+                println("当前非房主，无法选择，只能建议。");
+            }
+        } catch (Exception ex) {
+            println("发送游戏选择失败: " + ex.getMessage());
+        }
+        // Apply locally too
+        board.onGameSelected(type, "host");
+    }
+
+    private void clientSuggestGame(GameType type){
+        println("客户端建议游戏：" + type);
+        try {
+            com.easy.net.NetClient c = getClientIfAny();
+            if (c != null) {
+                c.sendJson(com.easy.net.Proto.gameSuggest(type.name()));
+            }
+        } catch (Exception ex){
+            println("发送建议失败: " + ex.getMessage());
+        }
+    }
+
+    private com.easy.net.NetServer getServerIfAny(){
+        try {
+            java.lang.reflect.Field f = SidebarPanel.class.getDeclaredField("server");
+            f.setAccessible(true);
+            return (com.easy.net.NetServer) f.get(sidebar);
+        } catch (Exception e){ return null; }
+    }
+    private com.easy.net.NetClient getClientIfAny(){
+        try {
+            java.lang.reflect.Field f = SidebarPanel.class.getDeclaredField("client");
+            f.setAccessible(true);
+            return (com.easy.net.NetClient) f.get(sidebar);
+        } catch (Exception e){ return null; }
     }
 }

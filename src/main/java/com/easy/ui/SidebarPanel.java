@@ -108,7 +108,7 @@ public class SidebarPanel extends JPanel {
 
             server = new NetServer(port, log, (x,y) -> {
                 if (board != null) board.onOpponentMove(x,y);
-            });
+            }, (com.easy.ui.NetEventListener) board);
             server.start();
             currentSender = server;
         } catch (Exception ex) {
@@ -120,7 +120,7 @@ public class SidebarPanel extends JPanel {
         try {
             client = new NetClient(log, (x,y) -> {
                 if (board != null) board.onOpponentMove(x,y);
-            });
+            }, (com.easy.ui.NetEventListener) board);
             client.connect(inviteIn.getText().replaceAll("\\s+",""));
             log.println("连接已建立");
             currentSender = client;
@@ -140,7 +140,7 @@ public class SidebarPanel extends JPanel {
         }
     }
 
-    
+
 private static String getLanIPv4() {
     // Prefer default-route interface via UDP "connect" (no packets actually sent)
     try (java.net.DatagramSocket ds = new java.net.DatagramSocket()) {
@@ -168,3 +168,4 @@ private static String getLanIPv4() {
     return null;
 }
 }
+

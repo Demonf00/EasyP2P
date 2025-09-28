@@ -26,4 +26,15 @@ public class Proto {
     public static JSONObject move(int x, int y, int turn, String hash){
         return new JSONObject().put("type","MOVE").put("x",x).put("y",y).put("turn",turn).put("hash",hash);
     }
+
+
+    public static JSONObject gameSelect(String game, String starter){
+        return new JSONObject().put("type","GAME").put("cmd","select").put("game",game).put("starter", starter);
+    }
+    public static JSONObject gameSuggest(String game){
+        return new JSONObject().put("type","GAME").put("cmd","suggest").put("game",game);
+    }
+    public static JSONObject resetRound(){
+        return new JSONObject().put("type","GAME").put("cmd","reset");
+    }
 }
