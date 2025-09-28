@@ -92,8 +92,22 @@ public class NetClient implements MoveSender {
                         log.println("[CLIENT] 收到 ACK");
                     } else if ("MOVE".equals(type)) {
                         int x = jo.getInt("x"), y = jo.getInt("y");
-                        log.println("[CLIENT] 收到对方落子 x=" + x + " y=" + y);
-                        if (listener != null) listener.onOpponentMove(x, y);
+                        if (jo.has("fx") && jo.has("fy")) {
+                            int fx = jo.getInt("fx"), fy = jo.getInt("fy");
+                            if (events != null) {
+                                try {
+                                    com.easy.ui.BoardCanvas bc = (com.easy.ui.BoardCanvas) events;
+                                    bc.onOpponentMoveFxFy(fx, fy, x, y);
+                                } catch (ClassCastException ignore) {
+                                    if (listener != null) listener.onOpponentMove(x,y);
+                                }
+                            } else if (listener != null) {
+                                listener.onOpponentMove(x,y);
+                            }
+                        } else {
+                            if (listener != null) listener.onOpponentMove(x,y);
+                        }
+     
                     } else if ("GAME".equals(type)) {
                         String cmd = jo.optString("cmd", "");
                         String g = jo.optString("game", "GOMOKU");

@@ -4,7 +4,7 @@ import com.easy.ui.ConsoleSink;
 import com.easy.ui.MoveListener;
 import com.easy.ui.NetEventListener;
 
-import main.java.com.easy.net.UpnpHelper;
+import com.easy.net.UpnpHelper;
 
 import com.easy.ui.MoveSender;
 import org.json.JSONObject;
@@ -70,8 +70,25 @@ public class NetServer implements MoveSender {
 
                         String type = jo.optString("type","");
                         if ("MOVE".equals(type)) {
-                            int x = jo.getInt("x"), y = jo.getInt("y");
-                            if (moveListener != null) moveListener.onOpponentMove(x, y);
+                                int x = jo.getInt("x"), y = jo.getInt("y");
+                                if (jo.has("fx") && jo.has("fy")) {
+                                    int fx = jo.getInt("fx"), fy = jo.getInt("fy");
+                                    // 优先尝试四参（用于西洋棋等）
+                                    if (events != null) {
+                                        try {
+                                            // BoardCanvas 提供 onOpponentMoveFxFy
+                                            com.easy.ui.BoardCanvas bc = (com.easy.ui.BoardCanvas) events;
+                                            bc.onOpponentMoveFxFy(fx, fy, x, y);
+                                        } catch (ClassCastException ignore) {
+                                            // 回退：两参
+                                            if (moveListener != null) moveListener.onOpponentMove(x,y);
+                                        }
+                                    } else if (moveListener != null) {
+                                        moveListener.onOpponentMove(x,y);
+                                    }
+                                } else {
+                                    if (moveListener != null) moveListener.onOpponentMove(x,y);
+                                }
                         } else if ("GAME".equals(type)) {
                             String cmd = jo.optString("cmd","");
                             String g = jo.optString("game","GOMOKU");
