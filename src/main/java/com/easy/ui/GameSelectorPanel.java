@@ -1,38 +1,34 @@
 package com.easy.ui;
 
-import com.easy.game.GameType;
-
 import javax.swing.*;
 import java.awt.*;
-import java.util.function.Consumer;
+import com.easy.game.GameType;
+import com.easy.net.Proto;
 
 public class GameSelectorPanel extends JPanel {
-    private final boolean isHost;
-    private final Consumer<GameType> onHostSelect;
-    private final Consumer<GameType> onClientSuggest;
+
+    private final java.util.function.Consumer<GameType> hostSelect;
+    private final java.util.function.Consumer<GameType> clientSuggest;
 
     public GameSelectorPanel(boolean isHost,
-                             Consumer<GameType> onHostSelect,
-                             Consumer<GameType> onClientSuggest) {
-        this.isHost = isHost;
-        this.onHostSelect = onHostSelect;
-        this.onClientSuggest = onClientSuggest;
+                             java.util.function.Consumer<GameType> hostSelect,
+                             java.util.function.Consumer<GameType> clientSuggest){
+        this.hostSelect = hostSelect;
+        this.clientSuggest = clientSuggest;
 
         setLayout(new GridLayout(0,1,6,6));
-        setBorder(BorderFactory.createTitledBorder(isHost ? "选择游戏(房主)" : "建议游戏(客户端)"));
-
-        add(makeBtn("五子棋",   GameType.GOMOKU));
-        add(makeBtn("黑白棋",   GameType.REVERSI));
-        add(makeBtn("西洋跳棋", GameType.CHECKERS));
-        add(makeBtn("西洋棋",   GameType.CHESS));
-        add(makeBtn("海战棋",   GameType.BATTLE));
+        add(btn("五子棋", GameType.GOMOKU, isHost));
+        add(btn("黑白棋", GameType.REVERSI, isHost));
+        add(btn("西洋跳棋", GameType.CHECKERS, isHost));
+        add(btn("西洋棋", GameType.CHESS, isHost));
+        add(btn("海战棋", GameType.BATTLE, isHost));
     }
 
-    private JButton makeBtn(String label, GameType type){
-        JButton b = new JButton(label);
+    private JButton btn(String text, GameType t, boolean isHost){
+        JButton b = new JButton(text);
         b.addActionListener(e -> {
-            if (isHost) onHostSelect.accept(type);
-            else onClientSuggest.accept(type);
+            if (isHost) hostSelect.accept(t);
+            else clientSuggest.accept(t);
         });
         return b;
     }

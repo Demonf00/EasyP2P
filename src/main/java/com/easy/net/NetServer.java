@@ -3,158 +3,184 @@ package com.easy.net;
 import com.easy.ui.ConsoleSink;
 import com.easy.ui.MoveListener;
 import com.easy.ui.NetEventListener;
-
-import com.easy.net.UpnpHelper;
-
-import com.easy.ui.MoveSender;
 import org.json.JSONObject;
 
 import java.io.*;
-import java.net.ServerSocket;
-import java.net.Socket;
-import java.net.SocketTimeoutException;
+import java.net.*;
+import java.util.concurrent.atomic.AtomicBoolean;
 
-/** 纯文本 JSON 协议的单连接服务器（与客户端一致） */
-public class NetServer implements MoveSender {
+public class NetServer implements com.easy.ui.MoveSender {
 
     private final int port;
     private final ConsoleSink log;
-    private final MoveListener moveListener;
+    private final MoveListener listener;
     private final NetEventListener events;
 
-    private volatile boolean running = false;
-    private ServerSocket serverSocket;
-
-    private Socket socket;
+    private ServerSocket ss;
+    private Socket s;
     private BufferedReader br;
     private OutputStream out;
 
-    private boolean upnpEnabled = false;
-    public void setUpnpEnabled(boolean enabled){ this.upnpEnabled = enabled; }
+    // ===== UPnP 开关与状态 =====
+    private volatile boolean upnpEnabled = true;  // 默认启用（由 UI 切公网时打开）
+    private volatile boolean upnpMapped  = false; // 是否已映射成功
+    private volatile int     mappedPort  = -1;
 
-    public NetServer(int port, ConsoleSink log, MoveListener ml, NetEventListener ev) {
-        this.port = port; this.log = log; this.moveListener = ml; this.events = ev;
+    public NetServer(int port, ConsoleSink log, MoveListener listener, NetEventListener events){
+        this.port = port;
+        this.log = log;
+        this.listener = listener;
+        this.events = events;
     }
 
     public void start() throws IOException {
-        serverSocket = new ServerSocket(port);
-        running = true;
+        ss = new ServerSocket();
+        ss.setReuseAddress(true);
+        ss.bind(new InetSocketAddress(port));
+        log.println("服务器监听端口: " + port + "，等待客户端连接…");
 
-        Thread t = new Thread(() -> {
-            log.println("服务器监听端口: " + port + "，等待客户端连接...");
-            while (running) {
-                try {
-                    socket = serverSocket.accept();
-                    socket.setTcpNoDelay(true);
-                    socket.setKeepAlive(true);
-                    socket.setSoTimeout(1_200_000); // 读超时，避免读阻塞
-                    log.println("[SERVER] accepted from " + socket.getRemoteSocketAddress());
+        // 开启 UPnP（如果用户选择公网）
+        if (upnpEnabled) {
+            tryOpenUpnp(port);
+        }
 
-                    br  = new BufferedReader(new InputStreamReader(socket.getInputStream(), "UTF-8"));
-                    out = socket.getOutputStream();
+        new Thread(this::acceptLoop, "server-accept").start();
+    }
 
-                    // 发送 HELLO
-                    log.println("[SERVER] sending HELLO...");
-                    Proto.sendJSON(out, Proto.hello("server"));
-                    log.println("[SERVER] HELLO sent.");
+    private void acceptLoop() {
+        try {
+            s = ss.accept();
+            log.println("客户端已连接: " + s.getRemoteSocketAddress());
+            s.setTcpNoDelay(true);
 
-                    // 进入读循环
-                    log.println("[SERVER] entering read loop...");
-                    while (running && !socket.isClosed()) {
-                        JSONObject jo = Proto.readJSON(br); // null 表示对端关闭
-                        if (jo == null) {
-                            log.println("[SERVER] read JSON -> null，对端关闭？");
-                            break;
-                        }
-                        log.println("[SERVER] received: " + jo);
+            out = s.getOutputStream();
+            br  = new BufferedReader(new InputStreamReader(s.getInputStream(), "UTF-8"));
 
-                        String type = jo.optString("type","");
-                        if ("MOVE".equals(type)) {
-                                int x = jo.getInt("x"), y = jo.getInt("y");
-                                if (jo.has("fx") && jo.has("fy")) {
-                                    int fx = jo.getInt("fx"), fy = jo.getInt("fy");
-                                    // 优先尝试四参（用于西洋棋等）
-                                    if (events != null) {
-                                        try {
-                                            // BoardCanvas 提供 onOpponentMoveFxFy
-                                            com.easy.ui.BoardCanvas bc = (com.easy.ui.BoardCanvas) events;
-                                            bc.onOpponentMoveFxFy(fx, fy, x, y);
-                                        } catch (ClassCastException ignore) {
-                                            // 回退：两参
-                                            if (moveListener != null) moveListener.onOpponentMove(x,y);
-                                        }
-                                    } else if (moveListener != null) {
-                                        moveListener.onOpponentMove(x,y);
-                                    }
-                                } else {
-                                    if (moveListener != null) moveListener.onOpponentMove(x,y);
-                                }
-                        } else if ("GAME".equals(type)) {
-                            String cmd = jo.optString("cmd","");
-                            String g = jo.optString("game","GOMOKU");
-                            String starter = jo.optString("starter","host");
-                            if (events != null) {
-                                if ("select".equals(cmd)) events.onGameSelected(com.easy.game.GameType.from(g), starter);
-                                else if ("suggest".equals(cmd)) events.onGameSuggested(com.easy.game.GameType.from(g));
-                                else if ("reset".equals(cmd))  events.onGameSelected(com.easy.game.GameType.from(g), "host");
-                            }
-                        } else if ("HELLO".equals(type)) {
-                            // 对端 HELLO
-                        } else if ("BATTLE".equals(type)) {
-                            // 先日志透传；需要的话可在此做服务端裁决
-                        } else if ("ACK".equals(type)) {
-                            // 可忽略
-                        } else {
-                            log.println("[SERVER] 未识别消息: " + jo);
-                        }
+            // 先发 HELLO
+            Proto.sendJSON(out, Proto.hello("server"));
+            log.println("[SERVER] HELLO sent.");
+
+            // 读循环
+            readLoop();
+        } catch (Exception e) {
+            log.println("服务器异常: " + e.getMessage());
+        } finally {
+            close();
+        }
+    }
+
+    private void readLoop() {
+        try {
+            log.println("[SERVER] entering read loop...");
+            JSONObject jo;
+            while ((jo = Proto.readJSON(br)) != null) {
+                String t = jo.optString("type", "");
+                log.println("[SERVER] received: " + jo.toString());
+
+                if ("HELLO".equals(t)) {
+                    // ignore
+                } else if ("MOVE".equals(t)) {
+                    int x = jo.optInt("x"), y = jo.optInt("y");
+                    if (listener != null) listener.onOpponentMove(x, y);
+                    // 回 ACK
+                    Proto.sendJSON(out, Proto.ack());
+                } else if ("MOVE_FXFY".equals(t)) {
+                    int fx = jo.optInt("fx"), fy = jo.optInt("fy");
+                    int tx = jo.optInt("x"),  ty = jo.optInt("y");
+                    if (listener instanceof com.easy.ui.BoardCanvas bc) {
+                        bc.onOpponentMoveFxFy(fx, fy, tx, ty);
+                    } else if (listener != null) {
+                        // 退化为单点
+                        listener.onOpponentMove(tx, ty);
                     }
-                } catch (SocketTimeoutException te) {
-                    log.println("[SERVER] read timeout: " + te.getMessage());
-                } catch (EOFException eof) {
-                    log.println("[SERVER] peer closed: " + eof.getMessage());
-                } catch (Exception e) {
-                    log.println("[SERVER] exception: " + e.getClass().getName() + ": " + String.valueOf(e.getMessage()));
-                    StringWriter sw = new StringWriter();
-                    e.printStackTrace(new PrintWriter(sw));
-                    log.println(sw.toString());
-                } finally {
-                    try { if (br != null) br.close(); } catch (Exception ignore){}
-                    try { if (out != null) out.close(); } catch (Exception ignore){}
-                    try { if (socket != null) socket.close(); } catch (Exception ignore){}
-                    // 不关闭 serverSocket；继续下一轮 accept
+                    Proto.sendJSON(out, Proto.ack());
+                } else if ("GAME".equals(t)) {
+                    String cmd = jo.optString("cmd", "");
+                    String g   = jo.optString("game", "GOMOKU");
+                    String starter = jo.optString("starter", "host");
+                    if ("select".equals(cmd)) {
+                        if (events != null) events.onGameSelected(com.easy.game.GameType.from(g), starter);
+                    } else if ("suggest".equals(cmd)) {
+                        if (events != null) events.onGameSuggested(com.easy.game.GameType.from(g));
+                    } else if ("reset".equals(cmd)) {
+                        // 如果你要“重开当前棋局”，这里触发 UI 重置
+                        if (events != null) events.onGameSelected(com.easy.game.GameType.from(g), "host");
+                    }
                 }
             }
-
-            // 停服与回收 UPnP
-            try { if (serverSocket != null) serverSocket.close(); } catch (Exception ignore){}
-            if (upnpEnabled) {
-                try { UpnpHelper.closeTcp(port); log.println("已回收 UPnP 端口映射: " + port); } catch (Exception ignore){}
-            }
-            log.println("服务器已关闭");
-        }, "easy-netserver");
-        t.setDaemon(true);
-        t.start();
+            log.println("[SERVER] read loop end, peer closed.");
+        } catch (SocketTimeoutException e) {
+            log.println("[SERVER] read timeout: " + e.getMessage());
+        } catch (Exception e) {
+            log.println("[SERVER] read error: " + e.getMessage());
+        }
     }
 
-    public void stopServer(){
-        running = false;
-        try { if (socket != null) socket.close(); } catch (Exception ignore){}
-        try { if (serverSocket != null) serverSocket.close(); } catch (Exception ignore){}
+    // ====== 供 UI/外部调用 ======
+    public void sendJson(JSONObject jo) throws IOException {
+        if (out == null) throw new IOException("尚未建立连接");
+        Proto.sendJSON(out, jo);
     }
 
-    public void closeUpnpIfAny(){
-        if (upnpEnabled) { try { UpnpHelper.closeTcp(port); } catch (Exception ignore){} }
-    }
-
-    // ===== MoveSender 实现（发 JSON）=====
     @Override
     public void sendMove(int x, int y, int turn, String hash) throws IOException {
-        if (out == null) throw new IOException("尚未连接");
+        if (out == null) throw new IOException("尚未建立连接");
         Proto.sendJSON(out, Proto.move(x, y, turn, hash));
     }
 
-    public void sendJson(JSONObject jo) throws IOException {
-        if (out == null) throw new IOException("尚未连接");
-        Proto.sendJSON(out, jo);
+    public void close() {
+        try { if (br != null)  br.close(); } catch (Exception ignore) {}
+        try { if (out != null) out.close(); } catch (Exception ignore) {}
+        try { if (s != null)    s.close(); } catch (Exception ignore) {}
+        try { if (ss != null)  ss.close(); } catch (Exception ignore) {}
+        closeUpnpIfAny();
+        log.println("服务器已关闭");
+    }
+
+    // ===== UPnP 相关 =====
+
+    /** UI 可调用：打开/关闭 UPnP 功能（仅影响后续 start/映射行为） */
+    public void setUpnpEnabled(boolean enabled) {
+        this.upnpEnabled = enabled;
+        log.println("UPnP 已" + (enabled ? "启用" : "关闭"));
+    }
+
+    /** UI 可调用：显式撤销映射（或在 close() 时自动调用） */
+    public void closeUpnpIfAny() {
+        if (!upnpMapped) return;
+        try {
+            // 如果存在 simtechdata 的库，优先使用
+            Class<?> cls = Class.forName("com.simtechdata.waifupnp.UPnP");
+            // closePortTCP(int)
+            cls.getMethod("closePortTCP", int.class).invoke(null, mappedPort);
+            log.println("已回收 UPnP 端口映射: " + mappedPort);
+        } catch (ClassNotFoundException cnf) {
+            // 没有库就忽略（或者在这里接入你自己的 miniupnp）
+            log.println("未检测到 waifupnp 库，跳过回收映射（可忽略）。");
+        } catch (Exception e) {
+            log.println("回收 UPnP 端口映射失败: " + e.getMessage());
+        } finally {
+            upnpMapped = false;
+            mappedPort = -1;
+        }
+    }
+
+    /** 根据端口尝试建立 UPnP 映射（库可选存在） */
+    private void tryOpenUpnp(int port) {
+        try {
+            Class<?> cls = Class.forName("com.simtechdata.waifupnp.UPnP");
+            boolean ok = (boolean) cls.getMethod("openPortTCP", int.class).invoke(null, port);
+            if (ok) {
+                upnpMapped = true;
+                mappedPort = port;
+                log.println("UPnP 端口映射成功: " + port + "/TCP");
+            } else {
+                log.println("UPnP 端口映射失败（路由器不支持或被禁用）");
+            }
+        } catch (ClassNotFoundException cnf) {
+            log.println("未检测到 waifupnp 库，跳过 UPnP 自动映射（可忽略）。");
+        } catch (Exception e) {
+            log.println("UPnP 映射异常: " + e.getMessage());
+        }
     }
 }
