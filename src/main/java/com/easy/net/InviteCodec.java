@@ -36,8 +36,8 @@ public static Endpoint parse(String code) throws Exception {
 
     String payload = s.trim();
     // Robustly extract using regex to avoid split pitfalls
-    Pattern ipPat   = Pattern.compile("(^|\\|)ip=([^|]+)($|\\|)");
-    Pattern portPat = Pattern.compile("(^|\\|)port=([0-9]{1,5})($|\\|)");
+    Pattern ipPat   = Pattern.compile("(^|[|])ip=([^|]+)($|[|])");
+    Pattern portPat = Pattern.compile("(^|[|])port=([0-9]{1,5})($|[|])");
 
 
     Matcher m1 = ipPat.matcher(payload);
