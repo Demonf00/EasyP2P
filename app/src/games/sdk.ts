@@ -1,1 +1,0 @@
-export type PlayerID=0|1; export interface Game<S,M>{ id:string; name:string; minPlayers:number; maxPlayers:number; setup():S; isLegal(s:S,m:M,by:PlayerID):boolean; apply(s:S,m:M,by:PlayerID):S; outcome(s:S):{winner?:PlayerID;draw?:boolean}|null; serialize(s:S):string; deserialize(text:string):S; }
