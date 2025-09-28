@@ -50,14 +50,15 @@ public class NetClient implements MoveSender {
                         log.println("收到对方落子 x=" + x + " y=" + y);
                         if (listener != null) listener.onOpponentMove(x, y);
                     } else if ("GAME".equals(type)) {
-                        String cmd = jo.optString("cmd", "");
-                        String g = jo.optString("game", "GOMOKU");
-                        String starter = jo.optString("starter", "host");
-                        if (events != null) {
-                            if ("select".equals(cmd)) events.onGameSelected(com.easy.game.GameType.from(g), starter);
-                            else if ("suggest".equals(cmd)) events.onGameSuggested(com.easy.game.GameType.from(g));
-                        }
-                        log.println("收到游戏事件: " + jo.toString());
+                    String cmd = jo.optString("cmd", "");
+                    String g = jo.optString("game", "GOMOKU");
+                    String starter = jo.optString("starter", "host");
+                    if (events != null) {
+                        if ("select".equals(cmd)) events.onGameSelected(com.easy.game.GameType.from(g), starter);
+                        else if ("suggest".equals(cmd)) events.onGameSuggested(com.easy.game.GameType.from(g));
+                        else if ("reset".equals(cmd)) events.onGameSelected(com.easy.game.GameType.from(g), "host");
+                    }
+                    log.println("收到游戏事件: " + jo.toString());
                     } else {
                         log.println("收到: " + jo.toString());
                     }

@@ -7,6 +7,17 @@ import java.awt.*;
 
 public class MainFrame extends JFrame implements ConsoleSink {
     private JComponent selector;
+    private void switchSelector(boolean isHost){
+        Container parent = selector.getParent();
+        if (parent != null) parent.remove(selector);
+        selector = new GameSelectorPanel(isHost, this::hostSelectGame, this::clientSuggestGame);
+        ((JPanel)((BorderLayout)((Container)parent).getLayout()).getLayoutComponent(java.awt.BorderLayout.CENTER)).add(selector, java.awt.BorderLayout.EAST);
+        // Rebuild layout
+        this.revalidate(); this.repaint();
+        println(isHost ? "你是房主：可以选择游戏" : "你是客户端：可以建议游戏");
+        // 记录我方是host还是client
+        board.setHost(isHost);
+    }
     private final ConsolePanel console = new ConsolePanel();
     private final SidebarPanel sidebar = new SidebarPanel(this);
     private BoardCanvas board;
@@ -27,6 +38,7 @@ new BoardCanvas(new com.easy.ui.MoveSender(){
 }, this);
 
         sidebar.setBoard(board);
+        sidebar.onRoleKnown(isHost -> switchSelector(isHost));
 
         add(sidebar, BorderLayout.WEST);
         add(board, BorderLayout.CENTER);
@@ -40,7 +52,6 @@ new BoardCanvas(new com.easy.ui.MoveSender(){
     public void println(String s){
         console.println(s);
     }
-
 
     // Called when host selects a game from selector
     private void hostSelectGame(GameType type){

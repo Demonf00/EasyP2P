@@ -6,6 +6,7 @@ import java.awt.*;
 import java.awt.event.*;
 
 public class BoardCanvas extends JPanel implements MoveListener, NetEventListener {
+    private int round = 1;
     private Game game;
     private final MoveSender sender;
     private final ConsoleSink log;
@@ -37,6 +38,7 @@ public class BoardCanvas extends JPanel implements MoveListener, NetEventListene
     public void setHost(boolean isHost){ this.hostSide = isHost; }
 
     private void afterMoveCheck(){
+        // no-op
         if (game.isFinished()){
             log.println("游戏结束：" + game.resultText() + "，3秒后重开下一局（先后手互换）");
             // flip starter
@@ -54,14 +56,13 @@ public class BoardCanvas extends JPanel implements MoveListener, NetEventListene
         else game = new GomokuGame();
         // iStart: whether I start; host alternates; map to game.myTurn
         game.reset(iStart);
-        log.println("切换到游戏：" + type + "，" + (iStart ? "你先手" : "对方先手"));
+        log.println("游戏开始：" + type + "，" + (iStart ? "你先手" : "你后手"));
         repaint();
     }
 
     @Override
     public void onOpponentMove(int x, int y){
         if (game == null) return;
-        game.setMyTurn(true); // ensure mouse can act after opponent
         // Apply move for opponent: simply call play since turns alternate
         game.play(x,y);
         repaint();
@@ -112,4 +113,11 @@ public class BoardCanvas extends JPanel implements MoveListener, NetEventListene
         g.setColor(Color.DARK_GRAY);
         g.drawString("当前：" + (game.currentPlayer()==1? "黑":"白") + (game.myTurn()?" (你的回合)":" (对方回合)") + " | " + game.resultText(), x0, y0+h+16);
     }
+    public void manualReset(boolean hostStartsNow){
+        // Reset current game; hostStartsNow true -> host先手
+        boolean iStart = hostStartsNow == hostSide;
+        setGame(game.type(), iStart);
+        round = 1;
+    }
+    public com.easy.game.GameType currentType(){ return game.type(); }
 }
