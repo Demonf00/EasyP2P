@@ -2,6 +2,7 @@ package com.easy.game;
 
 import java.awt.Point;
 import java.util.ArrayList;
+import java.util.Collections;
 import java.util.List;
 
 /** English Checkers / Draughts（简化：单段吃子，升王） */
@@ -36,10 +37,28 @@ public class CheckersGame implements Game {
         for (int y=N-3;y<N;y++) for (int x=0;x<N;x++) if(((x+y)&1)==1) b[x][y]=P1;
     }
 
+    /** 绘制用：1=黑方，2=白方，其它=空 */
     @Override public int get(int x,int y){
         int v=b[x][y];
         if (v==EMPTY) return 0;
-        return (v==P1||v==K1) ? 1 : 2; // 复用已有圆子渲染：1=黑方，2=白方
+        return (v==P1||v==K1) ? 1 : 2;
+    }
+
+    /** UI/逻辑辅助：获取原始格值 */
+    public int rawAt(int x,int y){ return b[x][y]; }
+
+    /** 是否我方棋子（基于原始格值） */
+    public boolean isMyPiece(int raw){
+        return iAmP1 ? (raw==P1 || raw==K1) : (raw==P2 || raw==K2);
+    }
+    public boolean isMyPieceAt(int x,int y){ return isMyPiece(b[x][y]); }
+
+    /** 给 UI：从(x,y) 可走的所有目标(终点) */
+    public List<Point> legalTargets(int x,int y){
+        if (!in(x,y)) return Collections.emptyList();
+        int v = b[x][y];
+        if (v==EMPTY || !isMyPiece(v)) return Collections.emptyList();
+        return legalMovesFrom(x,y);
     }
 
     private boolean in(int x,int y){ return x>=0&&x<N&&y>=0&&y<N; }
@@ -106,19 +125,18 @@ public class CheckersGame implements Game {
     }
 
     /** 我方可落到的终点 */
-    public List<Point> legalMovesFrom(int x,int y){
+    private List<Point> legalMovesFrom(int x,int y){
         int v=b[x][y]; List<Point> res=new ArrayList<>();
         if (v==EMPTY) return res;
-        // 方向
         if (isKing(v)){
             tryStep(x,y, 1, 1,res,true);
             tryStep(x,y,-1, 1,res,true);
             tryStep(x,y, 1,-1,res,true);
             tryStep(x,y,-1,-1,res,true);
-        }else if (v==P1){ // 向上
+        }else if (v==P1){
             tryStep(x,y, 1,-1,res,false);
             tryStep(x,y,-1,-1,res,false);
-        }else{ // P2 向下
+        }else{ // P2
             tryStep(x,y, 1, 1,res,false);
             tryStep(x,y,-1, 1,res,false);
         }

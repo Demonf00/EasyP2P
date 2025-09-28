@@ -4,12 +4,9 @@ import javax.swing.*;
 import com.easy.game.*;
 import com.easy.net.Proto;
 
-import com.easy.game.BattleshipGame;
-import com.easy.game.CheckersGame;
-import com.easy.game.ChessGame;
-
 import java.awt.*;
 import java.awt.event.*;
+import java.util.ArrayList;
 import java.util.List;
 
 public class BoardCanvas extends JPanel implements MoveListener, NetEventListener {
@@ -20,12 +17,18 @@ public class BoardCanvas extends JPanel implements MoveListener, NetEventListene
     private boolean hostSide = true;     // 我是否是房主
     private boolean hostStarts = true;   // 每局谁先（房主与客户端轮换）
 
-    // 最近一步高亮
+    // —— 视图翻转（Chess/Checkers 先手端本方在下）——
+    private boolean flip = false;
+    private int toView (int m){ return flip ? (game.size()-1 - m) : m; }
+    private int toModel(int v){ return flip ? (game.size()-1 - v) : v; }
+
+    // 最近一步高亮（存模型坐标）
     private Point lastMine = null;
     private Point lastOpp  = null;
 
-    // 棋种相关的选择（用于 Checkers/Chess 等需要“起点->终点”的游戏）
-    private Point sel = null; // 当前选中的格子（仅本地操控）
+    // 选中/提示（Chess/Checkers）
+    private Point sel = null;                     // 模型坐标
+    private List<Point> moveHints = new ArrayList<>(); // 模型坐标
 
     public BoardCanvas(MoveSender sender, ConsoleSink log){
         this.sender = sender; this.log = log;
@@ -45,36 +48,15 @@ public class BoardCanvas extends JPanel implements MoveListener, NetEventListene
                 int py = e.getY() - y0;
                 if (px < 0 || py < 0 || px >= w || py >= h) return;
 
-                int x = px / cell;
-                int y = py / cell;
+                // 视图格坐标 -> 模型格坐标（考虑 flip）
+                int vx = px / cell, vy = py / cell;
+                int x = toModel(vx), y = toModel(vy);
 
-                if (game.type() == GameType.CHESS) {
-                    onClickChess(x,y);
-                    return;
-                } else if (game.type() == GameType.CHECKERS) {
-                    onClickCheckers(x,y);
-                    return;
-                } else if (game.type() == GameType.BATTLE) {
-                    onClickBattle(x,y, px,py, cell,x0,y0); // 你之前的海战棋交互（左盘布阵/右盘开火）
-                    return;
-                }
-
-                // 其他棋（Gomoku/Reversi）：单点落子
-                if (!game.myTurn()) {
-                    log.println("现在不是你的回合");
-                    return;
-                }
-                if (game.play(x, y)) {
-                    lastMine = new Point(x,y);
-                    repaint();
-                    try {
-                        sender.sendMove(x, y, 0, "");
-                    } catch (Exception ex) {
-                        log.println("发送落子失败: " + ex.getMessage());
-                    }
-                    afterMoveCheck();
-                } else {
-                    log.println("此处不可落子");
+                switch (game.type()){
+                    case CHESS     -> onClickChess(x,y);
+                    case CHECKERS  -> onClickCheckers(x,y);
+                    case BATTLE    -> onClickBattle(vx,vy, px,py, cell,x0,y0);
+                    default        -> onClickPointGames(x,y);
                 }
             }
         });
@@ -82,14 +64,21 @@ public class BoardCanvas extends JPanel implements MoveListener, NetEventListene
 
     public void setHost(boolean isHost){ this.hostSide = isHost; }
 
+    // —— 清空覆盖层（切盘/重置时都要调用）——
+    private void clearOverlays(){
+        sel = null;
+        moveHints.clear();
+        lastMine = null;
+        lastOpp  = null;
+        repaint();
+    }
+
     private void afterMoveCheck(){
         if (game.isFinished()){
             log.println("游戏结束：" + game.resultText() + "，3秒后重开下一局（先后手互换）");
             hostStarts = !hostStarts;
             javax.swing.Timer t = new javax.swing.Timer(3000, e-> {
                 setGame(game.type(), hostStarts == hostSide);
-                lastMine = lastOpp = sel = null;
-                repaint();
             });
             t.setRepeats(false); t.start();
         }
@@ -105,6 +94,13 @@ public class BoardCanvas extends JPanel implements MoveListener, NetEventListene
         game.reset(iStart);
         try { game.setMyTurn(iStart); } catch (Throwable ignore){}
 
+        // 视角：先手端本方在下 => 只有当我不是先手时翻转
+        switch (type){
+            case CHESS, CHECKERS -> flip = !iStart;
+            default              -> flip = false;
+        }
+        clearOverlays();
+
         log.println("游戏开始：" + type + "，" + (iStart ? "你先手" : "你后手"));
         repaint();
     }
@@ -113,90 +109,87 @@ public class BoardCanvas extends JPanel implements MoveListener, NetEventListene
 
     @Override
     public void onOpponentMove(int x, int y){
-        // 普通棋（无起点）
         if (game == null) return;
         javax.swing.SwingUtilities.invokeLater(() -> {
+            // 无起点类（Gomoku/Reversi 等）
             if (game.play(x,y)){
-                lastOpp = new java.awt.Point(x,y);
+                lastOpp = new Point(x,y);
                 repaint();
                 afterMoveCheck();
             }
         });
     }
 
-    /** 新增：带起点的对方走子（用于 Chess/Checkers 等） */
+    /** 带起点（Chess/Checkers） */
     public void onOpponentMoveFxFy(int fx,int fy,int x,int y){
         if (game == null) return;
         javax.swing.SwingUtilities.invokeLater(() -> {
             switch (game.type()){
                 case CHESS -> {
-                    com.easy.game.ChessGame cg = (com.easy.game.ChessGame) game;
+                    ChessGame cg = (ChessGame) game;
                     if (cg.moveFromPeer(fx,fy,x,y)) {
-                        lastOpp = new java.awt.Point(x,y);
-                        repaint();
-                        afterMoveCheck();
-                    }
-                }
-                case CHECKERS -> {
-                    com.easy.game.CheckersGame ck = (com.easy.game.CheckersGame) game;
-                    if (ck.moveFromPeer(fx,fy,x,y)) {
-                        lastOpp = new java.awt.Point(x,y);
-                        repaint();
-                        afterMoveCheck();
-                    }
-                }
-                default -> {
-                    if (game.play(x,y)) {
-                        lastOpp = new java.awt.Point(x,y);
+                        lastOpp = new Point(x,y);
                         repaint(); afterMoveCheck();
                     }
                 }
+                case CHECKERS -> {
+                    CheckersGame ck = (CheckersGame) game;
+                    if (ck.moveFromPeer(fx,fy,x,y)) {
+                        lastOpp = new Point(x,y);
+                        repaint(); afterMoveCheck();
+                    }
+                }
+                default -> { /* ignore */ }
             }
         });
     }
 
-    // === 本地交互：Chess/Checkers/Battle ===
+    // === 本地交互 ===
+
+    private void onClickPointGames(int x,int y){
+        if (!game.myTurn()) { log.println("现在不是你的回合"); return; }
+        if (game.play(x, y)) {
+            lastMine = new Point(x,y);
+            repaint();
+            try { sender.sendMove(x, y, 0, ""); }
+            catch (Exception ex) { log.println("发送落子失败: " + ex.getMessage()); }
+            afterMoveCheck();
+        } else {
+            log.println("此处不可落子");
+        }
+    }
 
     private void onClickChess(int x,int y){
         ChessGame cg = (ChessGame) game;
         int v = cg.get(x,y);
 
-        // 没选中 -> 选自己子
-        if (sel == null) {
-            if (v==0 || !cg.isMyPiece(v)) {
-                log.println("请选择你方棋子");
-                return;
-            }
+        // 未选中 -> 选自己子并给出提示
+        if (sel == null){
+            if (v==0 || !cg.isMyPiece(v)){ log.println("请选择你方棋子"); return; }
             sel = new Point(x,y);
+            moveHints = cg.legalTargets(x,y);
             repaint();
             return;
         }
 
-        // 已有选中：如果再次点自己子 -> 改变选中
-        if (v!=0 && cg.isMyPiece(v)) {
+        // 已有选中：若点到自己子 -> 切换选中并更新提示
+        if (v!=0 && cg.isMyPiece(v)){
             sel = new Point(x,y);
+            moveHints = cg.legalTargets(x,y);
             repaint();
             return;
         }
 
-        // 尝试 from->to
+        if (!game.myTurn()){ log.println("现在不是你的回合"); return; }
+
+        // 尝试走子
         int fx = sel.x, fy = sel.y;
-        if (!game.myTurn()){
-            log.println("现在不是你的回合"); return;
-        }
-        if (cg.move(fx,fy,x,y)) {
+        if (cg.move(fx,fy,x,y)){
             lastMine = new Point(x,y);
-            sel = null;
+            sel = null; moveHints.clear();
             repaint();
             try {
-                // 发起点+终点
-                sender.sendMove(x, y, 0, ""); // 兼容旧接口
-                // 发送带 fx/fy 的 MOVE
-                if (sender instanceof com.easy.net.NetServer) {
-                    ((com.easy.net.NetServer) sender).sendJson(Proto.moveFxFy(fx,fy,x,y));
-                } else if (sender instanceof com.easy.net.NetClient) {
-                    ((com.easy.net.NetClient) sender).sendJson(Proto.moveFxFy(fx,fy,x,y));
-                }
+                sender.sendMove(x, y, 0, ""); // 如果网络层支持 fx/fy，可在那边带上
             } catch (Exception ex) {
                 log.println("发送走子失败: " + ex.getMessage());
             }
@@ -207,26 +200,46 @@ public class BoardCanvas extends JPanel implements MoveListener, NetEventListene
     }
 
     private void onClickCheckers(int x,int y){
-        // 如果你的 Checkers 是“先选子再落点”，可参照 Chess 的模式；此处留简化示意
-        if (!game.myTurn()) { log.println("现在不是你的回合"); return; }
-        if (game.play(x,y)) {
-            lastMine = new Point(x,y);
+        CheckersGame ck = (CheckersGame) game;
+        int raw = ck.rawAt(x,y);
+
+        if (sel == null){
+            if (raw==0 || !ck.isMyPiece(raw)){ log.println("请选择你方棋子"); return; }
+            sel = new Point(x,y);
+            moveHints = ck.legalTargets(x,y);
             repaint();
-            try { sender.sendMove(x,y,0,""); } catch (Exception ex){ log.println("发送失败: " + ex.getMessage()); }
+            return;
+        }
+
+        if (ck.isMyPiece(raw)){
+            sel = new Point(x,y);
+            moveHints = ck.legalTargets(x,y);
+            repaint();
+            return;
+        }
+
+        if (!game.myTurn()){ log.println("现在不是你的回合"); return; }
+
+        int fx = sel.x, fy = sel.y;
+        if (ck.move(fx,fy,x,y)){
+            lastMine = new Point(x,y);
+            sel = null; moveHints.clear();
+            repaint();
+            try { sender.sendMove(x,y,0,""); }
+            catch (Exception ex){ log.println("发送失败: " + ex.getMessage()); }
             afterMoveCheck();
         } else {
             log.println("此处不可落子");
         }
     }
 
-    private void onClickBattle(int x,int y,int px,int py,int cell,int x0,int y0){
-        // 保持你现有海战棋逻辑：布阵/开火……这里不展开
-        // 请在对应的成功“开火/命中/落空”时设置 lastMine/lastOpp 对应点位以高亮
+    private void onClickBattle(int viewX,int viewY,int px,int py,int cell,int x0,int y0){
+        // 这里沿用你的海战棋逻辑；若命中/落空/开火成功请设置 lastMine/lastOpp 对应模型坐标以便高亮
     }
 
     // === NetEventListener ===
     @Override
-    public void onGameSelected(com.easy.game.GameType type, String starter){
+    public void onGameSelected(GameType type, String starter){
         boolean hostStart = "host".equalsIgnoreCase(starter);
         boolean iStart = hostStart == hostSide;
         javax.swing.SwingUtilities.invokeLater(() -> setGame(type, iStart));
@@ -247,90 +260,123 @@ public class BoardCanvas extends JPanel implements MoveListener, NetEventListene
         int w = cell * n, h = cell * n;
         int x0 = (getWidth()-w)/2, y0 = (getHeight()-h)/2;
 
-        // 背景 & 网格
+        // 背景
         g.setColor(new Color(240, 230, 200));
         g.fillRect(x0, y0, w, h);
-        g.setColor(Color.GRAY);
-        for (int i=0;i<=n;i++){
-            g.drawLine(x0, y0+i*cell, x0+w, y0+i*cell);
-            g.drawLine(x0+i*cell, y0, x0+i*cell, y0+h);
-        }
 
-        // 各棋种绘制
-        if (game.type()==GameType.GOMOKU || game.type()==GameType.REVERSI || game.type()==GameType.CHECKERS){
-            for (int yy=0; yy<n; yy++) for (int xx=0; xx<n; xx++){
-                int v = game.get(xx, yy);
-                if (v==0) continue;
-                g.setColor(v==1? Color.BLACK : Color.WHITE);
-                g.fillOval(x0+xx*cell+4, y0+yy*cell+4, cell-8, cell-8);
-                g.setColor(Color.DARK_GRAY);
-                g.drawOval(x0+xx*cell+4, y0+yy*cell+4, cell-8, cell-8);
+        // 棋盘/棋子
+        if (game.type()==GameType.CHESS){
+            // 黑白格
+            for (int my=0; my<n; my++) for (int mx=0; mx<n; mx++){
+                int vx = toView(mx), vy = toView(my);
+                if (((vx+vy)&1)==1) g.setColor(new Color(181,136,99));
+                else g.setColor(new Color(240,217,181));
+                g.fillRect(x0+vx*cell, y0+vy*cell, cell, cell);
             }
-        } else if (game.type()==GameType.CHESS) {
-            // 画棋盘黑白格
-            for (int yy=0; yy<n; yy++) for (int xx=0; xx<n; xx++){
-                if ( ((xx+yy)&1)==1 ){
-                    g.setColor(new Color(181, 136, 99));
-                    g.fillRect(x0+xx*cell, y0+yy*cell, cell, cell);
-                } else {
-                    g.setColor(new Color(240, 217, 181));
-                    g.fillRect(x0+xx*cell, y0+yy*cell, cell, cell);
+            // 选中虚线 & 提示
+            Graphics2D g2 = (Graphics2D) g;
+            if (sel != null){
+                int vx = toView(sel.x), vy = toView(sel.y);
+                float[] dash = {6f,6f};
+                Stroke old = g2.getStroke();
+                g2.setColor(new Color(220,70,70));
+                g2.setStroke(new BasicStroke(2f, BasicStroke.CAP_BUTT,
+                        BasicStroke.JOIN_MITER, 10f, dash, 0f));
+                g2.drawRect(x0+vx*cell+2, y0+vy*cell+2, cell-4, cell-4);
+                g2.setStroke(old);
+            }
+            if (!moveHints.isEmpty()){
+                g.setColor(new Color(80,200,120,120));
+                for (Point p : moveHints){
+                    int vx = toView(p.x), vy = toView(p.y);
+                    g.fillRect(x0+vx*cell+4, y0+vy*cell+4, cell-8, cell-8);
                 }
             }
-            // 选中格提示
-            if (sel != null){
-                g.setColor(new Color(0,120,215,80));
-                g.fillRect(x0+sel.x*cell, y0+sel.y*cell, cell, cell);
-                g.setColor(new Color(0,120,215));
-                g.drawRect(x0+sel.x*cell, y0+sel.y*cell, cell, cell);
-            }
-            // 画棋子（用 Unicode 符号）
+            // 棋子（Unicode）
             ChessGame cg = (ChessGame) game;
-            for (int yy=0; yy<n; yy++) for (int xx=0; xx<n; xx++){
-                int v = cg.get(xx, yy);
+            for (int my=0; my<n; my++) for (int mx=0; mx<n; mx++){
+                int v = cg.get(mx,my);
                 if (v==0) continue;
                 String sym = chessSymbol(v);
-                g.setColor(v>0 ? Color.BLACK : Color.BLACK);
+                int vx = toView(mx), vy = toView(my);
+                g.setColor(Color.BLACK);
                 g.setFont(getFont().deriveFont(Font.PLAIN, cell*0.7f));
                 FontMetrics fm = g.getFontMetrics();
-                int sx = x0+xx*cell + (cell - fm.stringWidth(sym))/2;
-                int sy = y0+yy*cell + (cell + fm.getAscent()-fm.getDescent())/2 - 2;
+                int sx = x0+vx*cell + (cell - fm.stringWidth(sym))/2;
+                int sy = y0+vy*cell + (cell + fm.getAscent()-fm.getDescent())/2 - 2;
                 g.drawString(sym, sx, sy);
             }
-        } else if (game.type()==GameType.BATTLE) {
-            // 你的海战棋双盘绘制逻辑保持；请在成功“发射/命中/落空”时设置 lastMine/lastOpp
+        } else {
+            // 通用网格
+            g.setColor(Color.GRAY);
+            for (int i=0;i<=n;i++){
+                g.drawLine(x0, y0+i*cell, x0+w, y0+i*cell);
+                g.drawLine(x0+i*cell, y0, x0+i*cell, y0+h);
+            }
+            // 其它棋子（含 Checkers/Gomoku/Reversi）
+            for (int my=0; my<n; my++) for (int mx=0; mx<n; mx++){
+                int v = game.get(mx, my);
+                if (v==0) continue;
+                int vx = toView(mx), vy = toView(my);
+                g.setColor(v==1? Color.BLACK : Color.WHITE);
+                g.fillOval(x0+vx*cell+4, y0+vy*cell+4, cell-8, cell-8);
+                g.setColor(Color.DARK_GRAY);
+                g.drawOval(x0+vx*cell+4, y0+vy*cell+4, cell-8, cell-8);
+            }
+            // Checkers 的选中+提示
+            if (game.type()==GameType.CHECKERS){
+                Graphics2D g2 = (Graphics2D) g;
+                if (sel != null){
+                    int vx = toView(sel.x), vy = toView(sel.y);
+                    float[] dash = {6f,6f};
+                    Stroke old = g2.getStroke();
+                    g2.setColor(new Color(220,70,70));
+                    g2.setStroke(new BasicStroke(2f, BasicStroke.CAP_BUTT,
+                            BasicStroke.JOIN_MITER, 10f, dash, 0f));
+                    g2.drawRect(x0+vx*cell+2, y0+vy*cell+2, cell-4, cell-4);
+                    g2.setStroke(old);
+                }
+                if (!moveHints.isEmpty()){
+                    g.setColor(new Color(80,200,120,120));
+                    for (Point p : moveHints){
+                        int vx = toView(p.x), vy = toView(p.y);
+                        g.fillRect(x0+vx*cell+4, y0+vy*cell+4, cell-8, cell-8);
+                    }
+                }
+            }
         }
 
-        // 最新一步高亮
+        // 最新一步高亮（绿色=我，红框=对方）
         if (lastMine != null){
-            g.setColor(new Color(46, 204, 113, 160)); // 绿
-            g.fillRect(x0+lastMine.x*cell, y0+lastMine.y*cell, cell, cell);
+            int vx = toView(lastMine.x), vy = toView(lastMine.y);
+            g.setColor(new Color(46, 204, 113, 160));
+            g.fillRect(x0+vx*cell, y0+vy*cell, cell, cell);
         }
         if (lastOpp != null){
-            g.setColor(new Color(231, 76, 60, 150)); // 红
-            g.drawRect(x0+lastOpp.x*cell, y0+lastOpp.y*cell, cell-1, cell-1);
-            g.drawRect(x0+lastOpp.x*cell+1, y0+lastOpp.y*cell+1, cell-3, cell-3);
+            int vx = toView(lastOpp.x), vy = toView(lastOpp.y);
+            g.setColor(new Color(231, 76, 60, 150));
+            g.drawRect(x0+vx*cell, y0+vy*cell, cell-1, cell-1);
+            g.drawRect(x0+vx*cell+1, y0+vy*cell+1, cell-3, cell-3);
         }
 
         // 状态行
         g.setColor(Color.DARK_GRAY);
-        String info = "当前：" + (game.currentPlayer()==1? "黑/白先" : "白/黑先"); // 这里仅占位
-        g.drawString(info + " | " + game.resultText(), x0, y0+h+16);
+        g.drawString("当前：" + (game.myTurn() ? "你的回合" : "对方回合") + " | " + game.resultText(), x0, y0+h+16);
     }
 
     private String chessSymbol(int v){
-        // 白子(>0)：♙♘♗♖♕♔   黑子(<0)：♟♞♝♜♛♚
+        // 白(>0)：♙♘♗♖♕♔   黑(<0)：♟♞♝♜♛♚
         int a = Math.abs(v);
         boolean white = v>0;
-        switch (a){
-            case ChessGame.WP: return white ? "♙" : "♟";
-            case ChessGame.WN: return white ? "♘" : "♞";
-            case ChessGame.WB: return white ? "♗" : "♝";
-            case ChessGame.WR: return white ? "♖" : "♜";
-            case ChessGame.WQ: return white ? "♕" : "♛";
-            case ChessGame.WK: return white ? "♔" : "♚";
-        }
-        return "?";
+        return switch (a){
+            case ChessGame.WP -> white ? "♙" : "♟";
+            case ChessGame.WN -> white ? "♘" : "♞";
+            case ChessGame.WB -> white ? "♗" : "♝";
+            case ChessGame.WR -> white ? "♖" : "♜";
+            case ChessGame.WQ -> white ? "♕" : "♛";
+            case ChessGame.WK -> white ? "♔" : "♚";
+            default -> "?";
+        };
     }
 
     public void manualReset(boolean hostStartsNow){
@@ -338,5 +384,5 @@ public class BoardCanvas extends JPanel implements MoveListener, NetEventListene
         setGame(game.type(), iStart);
     }
 
-    public com.easy.game.GameType currentType(){ return game.type(); }
+    public GameType currentType(){ return game.type(); }
 }

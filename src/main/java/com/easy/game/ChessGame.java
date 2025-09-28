@@ -1,6 +1,8 @@
 package com.easy.game;
 
 import java.awt.Point;
+import java.util.ArrayList;
+import java.util.List;
 
 /** 最小可玩版：走法合法（不含易位/吃过路兵），兵到底升后；吃王判胜。 */
 public class ChessGame implements Game {
@@ -56,6 +58,21 @@ public class ChessGame implements Game {
     public boolean isMyPiece(int v){
         if (v == 0) return false;
         return (iAmWhite && v > 0) || (!iAmWhite && v < 0);
+    }
+
+    /** 返回从 (fx,fy) 出发的所有合法终点（仅返回吃空或吃对方的格） */
+    public List<Point> legalTargets(int fx,int fy){
+        List<Point> res = new ArrayList<>();
+        if (!in(fx,fy)) return res;
+        int v = b[fx][fy];
+        if (v==0 || !isMyPiece(v)) return res;
+        for (int y=0;y<N;y++) for (int x=0;x<N;x++){
+            if (isLegalFromTo(fx,fy,x,y)){
+                int dst = b[x][y];
+                if (dst==0 || Integer.signum(dst)!=Integer.signum(v)) res.add(new Point(x,y));
+            }
+        }
+        return res;
     }
 
     /** 给 UI 预判用：这步是否合法（不落子，仅判断） */
